@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include "IMU sensor.h"
 
 // put function declarations here:
 int myFunction(int, int);
