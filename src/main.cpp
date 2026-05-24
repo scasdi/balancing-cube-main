@@ -6,14 +6,17 @@ int myFunction(int, int);
 
 void setup() {
   // put your setup code here, to run once:
-  int result = myFunction(2, 3);
+  Serial.begin(115200);
+  delay(1000); // Wait for Serial to initialize
+  if (!init_IMU()) {
+    while (1); // Halt if IMU initialization fails
+  }
 }
 
 void loop() {
   // put your main code here, to run repeatedly:
-}
-
-// put function definitions here:
-int myFunction(int x, int y) {
-  return x + y;
+  float pitch = get_pitch_angle();
+  Serial.print("Pitch Angle: ");
+  Serial.println(pitch);
+  delay(10); // Delay to match the IMU report interval
 }
