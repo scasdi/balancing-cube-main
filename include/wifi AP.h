@@ -1,5 +1,7 @@
 #pragma once
 #include "Arduino.h"
-#include <Wifi.h>
+#include <WiFi.h>
+#include "pins.h"
 
-void init_wifi_AP()
+void init_wifi_AP();
+void check_wifi_commands();
