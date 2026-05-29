@@ -1,8 +1,31 @@
+import os
+import re
 import serial
 import serial.tools.list_ports
 import time
 import sys
 import socket
+import threading
+
+CONFIG_PATH = os.path.join(os.path.dirname(__file__), "include", "network_config.h")
+
+
+def load_network_config():
+    default_ip = "192.168.4.1"
+    default_port = 1234
+    if not os.path.exists(CONFIG_PATH):
+        return default_ip, default_port
+
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        text = f.read()
+
+    ip_match = re.search(r'WIFI_AP_IP\]\s*=\s*"([^"]+)"', text)
+    port_match = re.search(r'UDP_PORT\s*=\s*([0-9]+)', text)
+
+    ip = ip_match.group(1) if ip_match else default_ip
+    port = int(port_match.group(1)) if port_match else default_port
+    return ip, port
+
 
 def find_esp32_port():
     print("Scanning for connected USB devices...")
@@ -62,15 +85,31 @@ def run_serial_terminal():
     esp32.close()
 
 def run_wifi_terminal():
-    UDP_IP = "192.168.4.1"
-    UDP_PORT = 1234
+    UDP_IP, UDP_PORT = load_network_config()
     
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(1.0) 
+        sock.settimeout(1.0)
     except Exception as e:
         print(f"Failed to create socket: {e}")
         return
+
+    stop_event = threading.Event()
+
+    def receive_loop():
+        while not stop_event.is_set():
+            try:
+                data, _ = sock.recvfrom(1024)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            if data:
+                print(f"\n[ESP Reply] {data.decode().strip()}")
+                print("WiFi-CMD> ", end="", flush=True)
+
+    recv_thread = threading.Thread(target=receive_loop, daemon=True)
+    recv_thread.start()
 
     print("\n=== ESP32 WiFi (UDP) Terminal ===")
     print(f"Target: {UDP_IP}:{UDP_PORT}")
@@ -80,11 +119,8 @@ def run_wifi_terminal():
     # ==============================================================
     print("Initiating connection to ESP32...")
     sock.sendto("HELLO\n".encode(), (UDP_IP, UDP_PORT))
-    try:
-        data, _ = sock.recvfrom(1024)
-        print(f"[{UDP_IP}] says: {data.decode().strip()}")
-    except socket.timeout:
-        print(">>> WARNING: No response from ESP32! Are you connected to its WiFi? <<<")
+    print("Waiting for ESP handshake reply...")
+    time.sleep(1.0)
     # ==============================================================
 
     print("\nType a command (Type 'exit' to quit).")
@@ -101,18 +137,13 @@ def run_wifi_terminal():
                 continue
                 
             sock.sendto((user_command + '\n').encode(), (UDP_IP, UDP_PORT))
-            
-            try:
-                data, _ = sock.recvfrom(1024)
-                if data:
-                    print(f"Reply: {data.decode().strip()}\n")
-            except socket.timeout:
-                pass
-                
+
     except KeyboardInterrupt:
         print("\nClosing WiFi terminal.")
     finally:
+        stop_event.set()
         sock.close()
+        recv_thread.join(timeout=1.0)
 
 def main():
     # ==============================================================
