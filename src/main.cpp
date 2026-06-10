@@ -4,6 +4,7 @@
 #include "pins.h"
 #include "commands.h"
 #include "controller.h"
+#include "LQR.h"
 
 static bool lastPressed = false;
 static bool stablePressed = false;
