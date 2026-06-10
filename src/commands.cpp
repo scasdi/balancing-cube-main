@@ -1,10 +1,9 @@
 #include "commands.h"
-#include "pins.h" // כדי להכיר את החומרה
+#include "pins.h"
 
 String process_command(String command) {
-    command.trim(); // ניקוי רווחים מיותרים
+    command.trim(); 
     
-    // כאן יושבת כל הלוגיקה - פעם אחת בלבד!
     if (command == "HELLO") {
         return "banana confirmed sir.";
     } 
@@ -25,6 +24,6 @@ String process_command(String command) {
         return "LED_O_OFF_OK";
     }
     
-    // אם אף תנאי לא התקיים
+
     return "UNKNOWN_CMD: " + command;
 }
