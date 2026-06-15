@@ -50,7 +50,8 @@ def run_serial_terminal():
     print(f"ESP32 detected on port: {com_port}")
     
     try:
-        esp32 = serial.Serial(com_port, 115200, timeout=1)
+        # הקטנו את ה-timeout כדי שהקריאה לא תתקע
+        esp32 = serial.Serial(com_port, 115200, timeout=0.1)
         time.sleep(2) 
     except serial.SerialException as e:
         print(f"Error opening port {com_port}: {e}")
@@ -58,8 +59,35 @@ def run_serial_terminal():
         return
 
     print("\n=== ESP32 USB-Serial Terminal ===")
-    print("Type 'exit' to quit.\n")
+    print("Type 'exit' to quit.")
+    print("Type 'show' to see sensor data, 'hide' to mute it.\n")
 
+    stop_event = threading.Event()
+    # משתנה שקובע אם להדפיס למסך את קריאות ה-Pitch או לא (מתחיל בשקט)
+    show_sensor = [False] 
+
+    # תהליכון שרץ ברקע וכל הזמן שואב נתונים כדי שה-ESP32 לא יקפא
+    def receive_loop():
+        while not stop_event.is_set():
+            try:
+                if esp32.in_waiting > 0:
+                    line = esp32.readline().decode('utf-8', errors='ignore').strip()
+                    if line:
+                        # מסננים: אם זו הודעת Pitch, נדפיס רק אם ביקשנו show
+                        if line.startswith("Pitch:"):
+                            if show_sensor[0]:
+                                print(f"\r[Sensor] {line}\nSerial-CMD> ", end="", flush=True)
+                        else:
+                            # כל הודעה אחרת (למשל ACK של הסרוו) תודפס מיד
+                            print(f"\r[ESP] {line}\nSerial-CMD> ", end="", flush=True)
+            except Exception:
+                pass
+            time.sleep(0.01)
+
+    recv_thread = threading.Thread(target=receive_loop, daemon=True)
+    recv_thread.start()
+
+    # הלולאה הראשית של הטרמינל (לקליטת פקודות ממך)
     while True:
         try:
             user_command = input("Serial-CMD> ") 
@@ -67,22 +95,25 @@ def run_serial_terminal():
             if user_command.lower() == 'exit':
                 print("Closing USB connection.")
                 break
-                
-            if user_command.strip() == '':
+            # פקודות פנימיות לפייתון לשליטה על התצוגה
+            elif user_command.lower() == 'hide':
+                show_sensor[0] = False
+                print("Sensor output hidden. (ESP32 is running smoothly in background)")
+                continue
+            elif user_command.lower() == 'show':
+                show_sensor[0] = True
                 continue
                 
-            esp32.write((user_command + '\n').encode())
-            
-            time.sleep(0.1)
-            if esp32.in_waiting > 0:
-                response = esp32.read(esp32.in_waiting).decode().strip()
-                print(f"Reply: {response}\n")
+            if user_command.strip() != '':
+                esp32.write((user_command + '\n').encode())
                 
         except KeyboardInterrupt:
             print("\nClosing connection.")
             break
 
+    stop_event.set()
     esp32.close()
+    recv_thread.join(timeout=1.0)
 
 def run_wifi_terminal():
     UDP_IP, UDP_PORT = load_network_config()
@@ -113,15 +144,10 @@ def run_wifi_terminal():
 
     print("\n=== ESP32 WiFi (UDP) Terminal ===")
     print(f"Target: {UDP_IP}:{UDP_PORT}")
-    
-    # ==============================================================
-    # כאן נמצאת שליחת ה-HELLO הראשונית (Handshake) <<<
-    # ==============================================================
     print("Initiating connection to ESP32...")
     sock.sendto("HELLO\n".encode(), (UDP_IP, UDP_PORT))
     print("Waiting for ESP handshake reply...")
     time.sleep(1.0)
-    # ==============================================================
 
     print("\nType a command (Type 'exit' to quit).")
 
@@ -146,9 +172,6 @@ def run_wifi_terminal():
         recv_thread.join(timeout=1.0)
 
 def main():
-    # ==============================================================
-    # כאן נמצאת ההשהיה שנותנת לבקר זמן לעלות אחרי הצריבה <<<
-    # ==============================================================
     print("Waiting 3 seconds for ESP32 to boot...")
     time.sleep(3)
 
