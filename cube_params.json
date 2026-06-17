@@ -1,0 +1,22 @@
+{
+  "physical_params": {
+    "g": 9.81,
+    "m_f": 0.5,
+    "m_w": 0.2,
+    "l_f": 0.075,
+    "l_w": 0.075,
+    "I_f": 0.002,
+    "I_w": 0.0005,
+    "b_w": 0.0001
+  },
+  "lqr_penalties": {
+    "Q_theta": 1000.0,
+    "Q_theta_dot": 100.0,
+    "Q_psi": 0.0,
+    "Q_psi_dot": 1.0,
+    "R_motor": 10.0
+  },
+  "calculated_gains": {
+    "K": [0.0, 0.0, 0.0, 0.0]
+  }
+}

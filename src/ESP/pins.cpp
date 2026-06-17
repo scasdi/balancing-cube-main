@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include "pins.h"
+#include "ESP/pins.h"
 
 void init_pins() {
   pinMode(LED_Y, OUTPUT);

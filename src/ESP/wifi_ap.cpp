@@ -1,10 +1,10 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <cstring>
-#include "wifi_ap.h"
-#include "commands.h"
-#include "pins.h"
-#include "network_config.h"
+#include "ESP/wifi_ap.h"
+#include "ESP/commands.h"
+#include "ESP/pins.h"
+#include "ESP/network_config.h"
 
 const char* ssid = "um... banana?";
 const char* password = "yes banana";

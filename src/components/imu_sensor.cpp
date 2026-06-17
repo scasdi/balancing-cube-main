@@ -1,4 +1,4 @@
-#include "imu_sensor.h"
+#include "components/imu_sensor.h"
 #include <Arduino.h>
 
 Adafruit_BNO08x imu;

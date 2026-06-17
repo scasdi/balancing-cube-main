@@ -1,4 +1,4 @@
-#include "controller.h"
+#include "ESP/controller.h"
 
 cube_state current_state = IDLE;
 hw_timer_t * timer = NULL;
