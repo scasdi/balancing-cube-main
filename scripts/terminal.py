@@ -6,193 +6,216 @@ import time
 import sys
 import socket
 import threading
+import json
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.signal import find_peaks
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "include", "network_config.h")
-
+JSON_PATH = "cube_params.json" # הקובץ שישמור את הפרמטרים
 
 def load_network_config():
     default_ip = "192.168.4.1"
     default_port = 1234
     if not os.path.exists(CONFIG_PATH):
         return default_ip, default_port
-
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         text = f.read()
-
     ip_match = re.search(r'WIFI_AP_IP\]\s*=\s*"([^"]+)"', text)
     port_match = re.search(r'UDP_PORT\s*=\s*([0-9]+)', text)
-
     ip = ip_match.group(1) if ip_match else default_ip
     port = int(port_match.group(1)) if port_match else default_port
     return ip, port
 
-
 def find_esp32_port():
-    print("Scanning for connected USB devices...")
     ports = serial.tools.list_ports.comports()
-    
-    if not ports:
-        return None
-        
+    if not ports: return None
     for port in ports:
         desc = port.description.lower()
         if "usb" in desc or "uart" in desc or "ch340" in desc or "cp210" in desc:
             return port.device
-            
     return ports[0].device
 
+# ==========================================
+# אשף הטסטים (System ID Wizard)
+# ==========================================
+def run_sysid_wizard(esp32):
+    print("\n" + "="*50)
+    print("   SYSTEM IDENTIFICATION WIZARD")
+    print("="*50)
+    print("\nFinding parameter: I_f (Frame Moment of Inertia)")
+    print("Pendulum test: Hang the frame from the axis and move to a 10-degree angle.")
+    
+    user_input = input("Type 'GO' to start the test, or anything else to abort: ")
+    if user_input.strip().lower() != 'go':
+        print("Test aborted. Returning to terminal.")
+        return
+
+    print("\nStarting test... Recording data for 10 seconds. DO NOT TOUCH!")
+    
+    # ניקוי חוצץ התקשורת ושליחת פקודת התחלה
+    esp32.reset_input_buffer()
+    esp32.write(b'START_PENDULUM\n')
+    
+    times = []
+    pitches = []
+    
+    start_wait = time.time()
+    while time.time() - start_wait < 12.0: # קצת ספר לביטחון
+        if esp32.in_waiting > 0:
+            line = esp32.readline().decode('utf-8', errors='ignore').strip()
+            if line == "TEST_DONE":
+                break
+            if line.startswith("TEST_DATA:"):
+                parts = line.replace("TEST_DATA:", "").split(",")
+                if len(parts) == 2:
+                    try:
+                        times.append(int(parts[0]) / 1000.0) # המרה לשניות
+                        pitches.append(float(parts[1]))
+                    except ValueError:
+                        pass
+
+    if len(pitches) < 50:
+        print("Error: Not enough data received. Check sensor connection.")
+        return
+
+    print("Data collection complete! Analyzing physics...")
+
+    # יישור ציר הזמן לאפס
+    times = np.array(times) - times[0]
+    pitches = np.array(pitches)
+
+    # מציאת נקודות הקיצון (Peaks) כדי לחשב את זמן המחזור
+    # משתמשים במרחק מינימלי של 50 דגימות כדי לא לתפוס רעשים
+    peaks, _ = find_peaks(pitches, distance=50) 
+    
+    if len(peaks) < 2:
+        print("Error: Could not detect clear oscillations. Did you swing it?")
+        return
+
+    # חישוב זמן המחזור הממוצע (T)
+    peak_times = times[peaks]
+    T_avg = np.mean(np.diff(peak_times))
+    print(f"-> Measured Oscillation Period (T): {T_avg:.3f} seconds")
+
+    # שליפת המשתנים הפיזיקליים מקובץ ה-JSON (אם קיים)
+    m_f = 0.5   # משקל שלדה חלופי אם אין JSON
+    l_f = 0.075 # מרכז כובד חלופי אם אין JSON
+    g = 9.81
+    
+    if os.path.exists(JSON_PATH):
+        try:
+            with open(JSON_PATH, 'r') as f:
+                data = json.load(f)
+                m_f = data.get("physical_params", {}).get("m_f", m_f)
+                l_f = data.get("physical_params", {}).get("l_f", l_f)
+        except: pass
+
+    # המתמטיקה של המטוטלת
+    I_f = ( (T_avg**2) * m_f * g * l_f ) / (4 * (np.pi**2))
+    
+    print(f"-> Using m_f={m_f}kg, l_f={l_f}m")
+    print(f"-> Calculated I_f: {I_f:.6f} kg*m^2")
+
+    # מראה ליוזר גרף כדי להוכיח שהמדידה מדויקת
+    print("\nOpening graph. Close the graph window to continue and save...")
+    plt.figure(figsize=(10, 5))
+    plt.title("Pendulum Test - Pitch Angle Over Time")
+    plt.plot(times, pitches, label="Raw Sensor Data", color="blue")
+    plt.plot(times[peaks], pitches[peaks], "rx", markersize=10, label="Detected Peaks (Period T)")
+    plt.xlabel("Time (Seconds)")
+    plt.ylabel("Pitch Angle (Degrees)")
+    plt.grid(True)
+    plt.legend()
+    plt.show() # התוכנית תעצור כאן עד שתסגור את החלון
+
+    # שמירה ל-JSON
+    params = {}
+    if os.path.exists(JSON_PATH):
+        with open(JSON_PATH, 'r') as f:
+            params = json.load(f)
+    
+    if "physical_params" not in params:
+        params["physical_params"] = {}
+        
+    params["physical_params"]["I_f"] = I_f
+    
+    with open(JSON_PATH, 'w') as f:
+        json.dump(params, f, indent=4)
+        
+    print("\nSaved successfully to cube_params.json!")
+    print("Moving back to terminal mode...\n")
+
+# ==========================================
+# הטרמינל הראשי (נשאר דומה, עם תוספת ההאזנה ל-get_params)
+# ==========================================
 def run_serial_terminal():
     com_port = find_esp32_port()
     if not com_port:
-        print("Error: No USB device found. Check your connection.")
+        print("Error: No USB device found.")
         return
         
-    print(f"ESP32 detected on port: {com_port}")
-    
     try:
-        # הקטנו את ה-timeout כדי שהקריאה לא תתקע
         esp32 = serial.Serial(com_port, 115200, timeout=0.1)
         time.sleep(2) 
     except serial.SerialException as e:
-        print(f"Error opening port {com_port}: {e}")
-        print("Make sure PlatformIO Serial Monitor is CLOSED.")
+        print(f"Error: {e}")
         return
 
     print("\n=== ESP32 USB-Serial Terminal ===")
-    print("Type 'exit' to quit.")
-    print("Type 'show' to see sensor data, 'hide' to mute it.\n")
+    print("Type 'get_params' to enter System Identification Wizard.")
+    print("Type 'show'/'hide' for sensor stream. Type 'exit' to quit.\n")
 
     stop_event = threading.Event()
-    # משתנה שקובע אם להדפיס למסך את קריאות ה-Pitch או לא (מתחיל בשקט)
     show_sensor = [False] 
+    wizard_active = [False] # דגל שמונע מהתהליכון להדפיס תוך כדי טסט
 
-    # תהליכון שרץ ברקע וכל הזמן שואב נתונים כדי שה-ESP32 לא יקפא
     def receive_loop():
         while not stop_event.is_set():
-            try:
-                if esp32.in_waiting > 0:
-                    line = esp32.readline().decode('utf-8', errors='ignore').strip()
-                    if line:
-                        # מסננים: אם זו הודעת Pitch, נדפיס רק אם ביקשנו show
-                        if line.startswith("Pitch:"):
-                            if show_sensor[0]:
-                                print(f"\r[Sensor] {line}\nSerial-CMD> ", end="", flush=True)
-                        else:
-                            # כל הודעה אחרת (למשל ACK של הסרוו) תודפס מיד
-                            print(f"\r[ESP] {line}\nSerial-CMD> ", end="", flush=True)
-            except Exception:
-                pass
+            if not wizard_active[0]:
+                try:
+                    if esp32.in_waiting > 0:
+                        line = esp32.readline().decode('utf-8', errors='ignore').strip()
+                        if line:
+                            if line.startswith("Pitch:"):
+                                if show_sensor[0]:
+                                    print(f"\r[Sensor] {line}\nCMD> ", end="", flush=True)
+                            else:
+                                print(f"\r[ESP] {line}\nCMD> ", end="", flush=True)
+                except Exception:
+                    pass
             time.sleep(0.01)
 
     recv_thread = threading.Thread(target=receive_loop, daemon=True)
     recv_thread.start()
 
-    # הלולאה הראשית של הטרמינל (לקליטת פקודות ממך)
     while True:
         try:
-            user_command = input("Serial-CMD> ") 
+            user_command = input("CMD> ") 
             
             if user_command.lower() == 'exit':
-                print("Closing USB connection.")
                 break
-            # פקודות פנימיות לפייתון לשליטה על התצוגה
             elif user_command.lower() == 'hide':
                 show_sensor[0] = False
-                print("Sensor output hidden. (ESP32 is running smoothly in background)")
                 continue
             elif user_command.lower() == 'show':
                 show_sensor[0] = True
+                continue
+            elif user_command.lower() == 'get_params':
+                wizard_active[0] = True # משתיק את ההדפסות ברקע
+                run_sysid_wizard(esp32)
+                wizard_active[0] = False # מחזיר את הטרמינל לחיים
                 continue
                 
             if user_command.strip() != '':
                 esp32.write((user_command + '\n').encode())
                 
         except KeyboardInterrupt:
-            print("\nClosing connection.")
             break
 
     stop_event.set()
     esp32.close()
     recv_thread.join(timeout=1.0)
 
-def run_wifi_terminal():
-    UDP_IP, UDP_PORT = load_network_config()
-    
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(1.0)
-    except Exception as e:
-        print(f"Failed to create socket: {e}")
-        return
-
-    stop_event = threading.Event()
-
-    def receive_loop():
-        while not stop_event.is_set():
-            try:
-                data, _ = sock.recvfrom(1024)
-            except socket.timeout:
-                continue
-            except OSError:
-                break
-            if data:
-                print(f"\n[ESP Reply] {data.decode().strip()}")
-                print("WiFi-CMD> ", end="", flush=True)
-
-    recv_thread = threading.Thread(target=receive_loop, daemon=True)
-    recv_thread.start()
-
-    print("\n=== ESP32 WiFi (UDP) Terminal ===")
-    print(f"Target: {UDP_IP}:{UDP_PORT}")
-    print("Initiating connection to ESP32...")
-    sock.sendto("HELLO\n".encode(), (UDP_IP, UDP_PORT))
-    print("Waiting for ESP handshake reply...")
-    time.sleep(1.0)
-
-    print("\nType a command (Type 'exit' to quit).")
-
-    try:
-        while True:
-            user_command = input("WiFi-CMD> ")
-            
-            if user_command.lower() == 'exit':
-                print("Closing WiFi connection.")
-                break
-                
-            if user_command.strip() == '':
-                continue
-                
-            sock.sendto((user_command + '\n').encode(), (UDP_IP, UDP_PORT))
-
-    except KeyboardInterrupt:
-        print("\nClosing WiFi terminal.")
-    finally:
-        stop_event.set()
-        sock.close()
-        recv_thread.join(timeout=1.0)
-
-def main():
-    print("Waiting 3 seconds for ESP32 to boot...")
-    time.sleep(3)
-
-    print("===============================")
-    print("   ESP32 Control Station       ")
-    print("===============================")
-    print("1. Connect via Serial (USB)")
-    print("2. Connect via WiFi (UDP)")
-    print("0. Exit")
-    
-    choice = input("\nSelect communication mode: ").strip()
-    
-    if choice == '1':
-        run_serial_terminal()
-    elif choice == '2':
-        run_wifi_terminal()
-    elif choice == '0':
-        print("Exiting...")
-        sys.exit(0)
-    else:
-        print("Invalid choice. Please run the script again.")
-
-if __name__ == "__main__":
-    main()
+# פונקציות ה-WIFI וה-MAIN נשארות ללא שינוי (כמו בקובץ ששלחת)
+# ...

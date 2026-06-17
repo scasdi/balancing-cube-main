@@ -1,39 +1,36 @@
 import numpy as np
 import control as ct
+import json
+import os
+
+CONFIG_FILE = "cube_params.json"
+
+def load_params():
+    if not os.path.exists(CONFIG_FILE):
+        raise FileNotFoundError(f"Missing {CONFIG_FILE}")
+    with open(CONFIG_FILE, 'r') as f:
+        return json.load(f)
+
+def save_params(data):
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(data, f, indent=4)
 
 def calculate_lqr():
-    # ==========================================
-    # 1. פרמטרים פיזיקליים של המערכת
-    # ==========================================
-    g = 9.81      # כוח המשיכה [m/s^2]
-    
-    # מסות [kg]
-    m_f = 0.5     # מסת מסגרת הקובייה (ללא הגלגל)
-    m_w = 0.2     # מסת גלגל התנופה
-    
-    # מרחקים מציר הסיבוב (הרצפה) למרכז המסה [m]
-    l_f = 0.075   # מרכז המסה של המסגרת (בערך באמצע הקובייה)
-    l_w = 0.075   # ציר הסיבוב של גלגל התנופה
-    
-    # מומנטי התמד (אינרציה) [kg*m^2]
-    I_f = 0.002   # אינרציה של המסגרת סביב ציר הפינה/צלע שעל הרצפה
-    I_w = 0.0005  # אינרציה של גלגל התנופה סביב ציר הסיבוב שלו
+    data = load_params()
+    p = data["physical_params"]
+    q = data["lqr_penalties"]
 
-    # ==========================================
-    # 2. חישובי עזר בניית מטריצות המערכת
-    # ==========================================
-    # מומנט ההתמד הכולל של המערכת כולה סביב ציר הנפילה
+    # שליפת פרמטרים פיזיקליים
+    g, m_f, m_w = p["g"], p["m_f"], p["m_w"]
+    l_f, l_w = p["l_f"], p["l_w"]
+    I_f, I_w = p["I_f"], p["I_w"]
+
+    # חישובי עזר
     I_tot = I_f + (m_f * l_f**2) + I_w + (m_w * l_w**2)
-    
-    # קבוע כוח הכבידה המושך את המערכת למטה (אפקט המטוטלת ההפוכה)
     C_g = (m_f * l_f + m_w * l_w) * g
     denominator = I_tot - I_w
 
-    # ==========================================
-    # 3. מטריצות מרחב המצב (State-Space)
-    # x = [theta, theta_dot, psi, psi_dot]^T
-    # (זווית קובייה, מהירות זוויתית קובייה, זווית גלגל, מהירות זוויתית גלגל)
-    # ==========================================
+    # מטריצת מצב
     A = np.array([
         [0, 1, 0, 0],
         [C_g / denominator, 0, 0, 0],
@@ -41,7 +38,7 @@ def calculate_lqr():
         [-C_g / denominator, 0, 0, 0]
     ])
 
-    # וקטור הכניסה מתאר איך מומנט המנוע משפיע על כל אחד מהמצבים
+    # וקטור כניסה
     B = np.array([
         [0],
         [-1 / denominator],
@@ -49,28 +46,20 @@ def calculate_lqr():
         [I_tot / (I_w * denominator)]
     ])
 
-    # ==========================================
-    # 4. הגדרת מטריצות העלות Q ו-R (הכוונון שלנו)
-    # ==========================================
-    # Q = diag([penalty_theta, penalty_theta_dot, penalty_psi, penalty_psi_dot])
-    Q = np.diag([1000.0,   # קנס עצום על זווית הקובייה (חייבת להיות 0!)
-                 100.0,    # קנס בינוני על מהירות הקובייה (למניעת רעידות)
-                 0.0,      # קנס 0 על מיקום הגלגל (לא אכפת לנו כמה סיבובים עשה)
-                 1.0])     # קנס קטן על מהירות הגלגל (למניעת הגעה לרוויה)
+    # מטריצות מחיר
+    Q = np.diag([q["Q_theta"], q["Q_theta_dot"], q["Q_psi"], q["Q_psi_dot"]])
+    R = np.array([[q["R_motor"]]])
 
-    R = np.array([[10.0]]) # קנס על מאמץ המנוע (מומנט)
-
-    # ==========================================
-    # 5. פתרון LQR 
-    # ==========================================
+    # פתרון ובדיקת יציבות
     K, S, E = ct.lqr(A, B, Q, R)
 
-    print("=== Optimal LQR Gain Matrix (K) ===")
-    print(f"K = [{K[0][0]:.4f}, {K[0][1]:.4f}, {K[0][2]:.4f}, {K[0][3]:.4f}]")
-    
-    print("\n=== Closed-Loop Eigenvalues (Poles) ===")
-    for pole in E:
-        print(f"{pole:.4f}")
+    # עדכון המערכת ושמירה אוטומטית
+    k_list = [float(K[0][0]), float(K[0][1]), float(K[0][2]), float(K[0][3])]
+    data["calculated_gains"]["K"] = k_list
+    save_params(data)
+
+    print("=== System Updated Successfully ===")
+    print(f"New K Matrix saved to JSON: {k_list}")
 
 if __name__ == "__main__":
     calculate_lqr()
