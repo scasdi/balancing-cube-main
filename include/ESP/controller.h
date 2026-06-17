@@ -14,6 +14,7 @@ enum cube_state {
 extern cube_state current_state;
 
 void set_state(cube_state new_state);
+void control_loop_task(void *pvParameters);
 void init_controller();   
 
 

@@ -7,36 +7,33 @@
 #include "components/imu_sensor.h"
 #include <Arduino.h>
 
-// Simple command processor (retains original behavior)
 String process_command(String command) {
-        command.trim(); 
-    
-        if (command == "HELLO") {
-                return "banana confirmed sir.";
-        } 
-        else if (command == "ON_Y") {
-                digitalWrite(LED_Y, HIGH);
-                return "LED_ON_OK";
-        } 
-        else if (command == "OFF_Y") {
-                digitalWrite(LED_Y, LOW);
-                return "LED_OFF_OK";
-        }
-        else if (command == "ON_O") {
-                digitalWrite(LED_O, HIGH);
-                return "LED_O_ON_OK";
-        }
-        else if (command == "OFF_O") {
-                digitalWrite(LED_O, LOW);
-                return "LED_O_OFF_OK";
-        }
-    
-        return "UNKNOWN_CMD: " + command;
+    command.trim(); 
+
+    if (command == "HELLO") {
+        return "banana confirmed sir.";
+    } 
+    else if (command == "ON_Y") {
+        digitalWrite(LED_Y, HIGH);
+        return "LED_ON_OK";
+    } 
+    else if (command == "OFF_Y") {
+        digitalWrite(LED_Y, LOW);
+        return "LED_OFF_OK";
+    }
+    else if (command == "ON_O") {
+        digitalWrite(LED_O, HIGH);
+        return "LED_O_ON_OK";
+    }
+    else if (command == "OFF_O") {
+        digitalWrite(LED_O, LOW);
+        return "LED_O_OFF_OK";
+    }
+
+    return "UNKNOWN_CMD: " + command;
 }
 
-// --- command subsystem ---
 void commands_init() {
-    // nothing to init here; pins are initialized elsewhere
 }
 
 static bool lastPressed = false;
@@ -49,10 +46,8 @@ static unsigned long lastImuPrintMillis = 0;
 static constexpr unsigned long IMU_PRINT_INTERVAL_MS = 50u;
 
 void commands_update(unsigned long currentMillis) {
-    // First, let WiFi subsystem process incoming commands
     check_wifi_commands();
 
-    // Button debounce and actions
     bool rawPressed = digitalRead(BUTTON) == LOW;
     if (rawPressed != lastRawPressed) {
         lastDebounceMillis = currentMillis;
@@ -78,7 +73,6 @@ void commands_update(unsigned long currentMillis) {
     lastRawPressed = rawPressed;
     digitalWrite(LED_O, stablePressed ? HIGH : LOW);
 
-    // Serial command handling
     if (Serial.available()) {
         String incoming_cmd = Serial.readStringUntil('\n');
         incoming_cmd.trim();
@@ -95,12 +89,14 @@ void commands_update(unsigned long currentMillis) {
         }
     }
 
-    // Periodic IMU telemetry (previously in main)
     if ((currentMillis - lastImuPrintMillis) > IMU_PRINT_INTERVAL_MS) {
         lastImuPrintMillis = currentMillis; 
-        float pitch = get_pitch_angle();
+        
+        imu_data_t imu_raw = get_imu_data();
+        float pitch_deg = imu_raw.pitch * 180.0f / PI;
+        
         char buf[64];
-        snprintf(buf, sizeof(buf), "Pitch: %.2f", pitch);
+        snprintf(buf, sizeof(buf), "Pitch: %.2f", pitch_deg);
         send_comm_message(buf);
     }
 }

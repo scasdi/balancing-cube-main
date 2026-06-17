@@ -1,8 +1,10 @@
 #include "ESP/controller.h"
+#include "components/imu_sensor.h"
+#include "ESP/LQR.h"
+#include <Arduino.h>
 
 cube_state current_state = IDLE;
-hw_timer_t * timer = NULL;
-
+TaskHandle_t ControlTaskHandle = NULL;
 
 void set_state(cube_state new_state) {
     current_state = new_state;
@@ -18,39 +20,57 @@ void set_state(cube_state new_state) {
     }
 }
 
-void IRAM_ATTR control_loop_ISR() {
-    switch (current_state) {
-        case IDLE:
-            // Implement idle control logic here
-            break;
-        case EDGE_BALANCE:
-            // Implement edge balancing control logic here
-            break;
-        case JUMP_TO_EDGE:
-            // Implement jump to edge control logic here
-            break;
-        case JUMP_TO_CORNER:
-            // Implement jump to corner control logic here
-            break;
-        case CORNER_BALANCE:
-            // Implement corner balancing control logic here
-            break;
-        case FALL_TO_EDGE:
-            // Implement fall to edge control logic here
-            break;
-        case FALL_TO_IDLE:
-            // Implement fall to idle control logic here
-            break;
+void control_loop_task(void *pvParameters) {
+    TickType_t xLastWakeTime;
+    const TickType_t xFrequency = pdMS_TO_TICKS(20);
+
+    xLastWakeTime = xTaskGetTickCount();
+
+    for (;;) {
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+
+        switch (current_state) {
+            case IDLE:
+                break;
+
+            case EDGE_BALANCE: {
+                imu_data_t imu_raw = get_imu_data();
+                
+                double theta     = static_cast<double>(imu_raw.pitch);
+                double theta_dot = static_cast<double>(imu_raw.pitch_rate);
+                double psi       = 0.0; 
+                double psi_dot   = 0.0; 
+
+                control_loop(theta, theta_dot, psi, psi_dot);
+                break;
+            }
+
+            case JUMP_TO_EDGE:
+                break;
+
+            case JUMP_TO_CORNER:
+                break;
+
+            case CORNER_BALANCE:
+                break;
+
+            case FALL_TO_EDGE:
+                break;
+
+            case FALL_TO_IDLE:
+                break;
+        }
     }
 }
 
-
 void init_controller() {     
-    timerBegin(0, 80, true); // Timer 0, prescaler 80 (1 tick = 1 microsecond)
-
-    timerAttachInterrupt(0, &control_loop_ISR, true); // Attach the ISR to the timer
-
-    timerAlarmWrite(0, 2000, true); // Set the timer to trigger every 2 ms
-
-    timerAlarmEnable(0); // Enable the timer alarm
+    xTaskCreatePinnedToCore(
+        control_loop_task,
+        "ControlLoopTask",
+        4096,
+        NULL,
+        3,
+        &ControlTaskHandle,
+        1
+    );
 }
