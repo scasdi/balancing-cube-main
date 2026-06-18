@@ -1,6 +1,16 @@
 #include <Arduino.h>
-#include "ESP.h"
-#include "components.h"
+
+// --- ESP Subsystems ---
+#include "ESP/pins.h"
+#include "ESP/wifi_ap.h"
+#include "ESP/web_server.h"
+#include "ESP/controller.h"
+#include "ESP/commands.h"
+#include "ESP/comms.h"
+
+// --- Components ---
+#include "components/servo.h"
+#include "components/imu_sensor.h"
 
 void setup() {
   Serial.begin(115200);

@@ -1,23 +1,38 @@
-#include <iostream>
+#include "ESP/LQR.h"
 
-// The control loop function (runs at your sample rate, e.g., 100Hz)
-void control_loop(double theta, double theta_dot, double psi, double psi_dot) {
-    // 1. Paste the K values your Python script printed out here
-    // Example values assuming your Python script output: K = [-31.62, -5.20, 0.00, -0.31]
-    const double K[4] = {-31.6228, -5.2015, 0.0000, -0.3162};
+// The K matrix gains. These values should be updated via JSON 
+// after running the Python System ID wizard.
+// Current array matches the 3-state vector: [K_theta, K_theta_dot, K_wheel_dot]
+static const float K[3] = { -0.5f, -0.1f, -0.01f }; // Default dummy values
 
-    // 2. State vector from your sensors
-    double x[4] = {theta, theta_dot, psi, psi_dot};
+// Offset correction filter state (represents the mechanical/mounting offset)
+static float x_f = 0.0f;
 
-    // 3. Target state (we want all zeros to balance upright)
-    double x_ref[4] = {0.0, 0.0, 0.0, 0.0};
+// Filter coefficient (alpha = 0.02) as proven stable in the IROS 2012 paper
+static const float alpha = 0.02f; 
 
-    // 4. Calculate control input (Motor Torque): u = -K * (x - x_ref)
-    double u = 0;
-    for (int i = 0; i < 4; ++i) {
-        u += -K[i] * (x[i] - x_ref[i]);
+void lqr_init() {
+    // Reset the mechanical offset filter when jumping up or starting a balance maneuver
+    x_f = 0.0f;
+}
+
+float calculate_lqr_torque(float theta_b, float theta_b_dot, float theta_w_dot) {
+    // 1. Update the offset correction low-pass filter (Paper Equation 8)
+    // This slowly tracks the true mechanical balance point over time
+    x_f = (1.0f - alpha) * x_f + alpha * theta_b;
+
+    // 2. Correct the body angle measurement (Paper Equation 9)
+    float theta_b_corrected = theta_b - x_f;
+
+    // 3. Assemble the state vector x = (theta_b, theta_b_dot, theta_w_dot)
+    float x[3] = { theta_b_corrected, theta_b_dot, theta_w_dot };
+
+    // 4. Calculate control input u = -K * x
+    float u = 0.0f;
+    for (int i = 0; i < 3; ++i) {
+        u -= K[i] * x[i];
     }
 
-    // 5. Send 'u' to your motor driver
-    std::cout << "Commanded Motor Torque: " << u << " Nm\n";
+    // 5. Return the calculated torque (Nm) to be commanded to the motor driver
+    return u;
 }

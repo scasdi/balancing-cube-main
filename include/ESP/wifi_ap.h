@@ -1,6 +1,6 @@
 #pragma once
 #include <WiFi.h>
-#include "pins.h"
+#include "ESP/pins.h"
 
 void init_wifi_AP();
 void check_wifi_commands();

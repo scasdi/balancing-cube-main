@@ -1,31 +1,24 @@
 import os
-import re
+import time
+import json
+import threading
+import numpy as np
 import serial
 import serial.tools.list_ports
-import time
-import sys
-import socket
-import threading
-import json
-import numpy as np
 import matplotlib.pyplot as plt
-from scipy.signal import find_peaks
+from scipy.optimize import curve_fit
+
+
+def r2_score(y_true, y_pred):
+    """Simple R^2 (coefficient of determination) implementation."""
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    ss_res = np.sum((y_true - y_pred) ** 2)
+    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+    return 1.0 - ss_res / ss_tot if ss_tot != 0 else 0.0
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "include", "network_config.h")
-JSON_PATH = "cube_params.json" # הקובץ שישמור את הפרמטרים
-
-def load_network_config():
-    default_ip = "192.168.4.1"
-    default_port = 1234
-    if not os.path.exists(CONFIG_PATH):
-        return default_ip, default_port
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        text = f.read()
-    ip_match = re.search(r'WIFI_AP_IP\]\s*=\s*"([^"]+)"', text)
-    port_match = re.search(r'UDP_PORT\s*=\s*([0-9]+)', text)
-    ip = ip_match.group(1) if ip_match else default_ip
-    port = int(port_match.group(1)) if port_match else default_port
-    return ip, port
+JSON_PATH = "cube_params.json"
 
 def find_esp32_port():
     ports = serial.tools.list_ports.comports()
@@ -36,119 +29,167 @@ def find_esp32_port():
             return port.device
     return ports[0].device
 
-# ==========================================
-# אשף הטסטים (System ID Wizard)
-# ==========================================
-def run_sysid_wizard(esp32):
-    print("\n" + "="*50)
-    print("   SYSTEM IDENTIFICATION WIZARD")
-    print("="*50)
-    print("\nFinding parameter: I_f (Frame Moment of Inertia)")
-    print("Pendulum test: Hang the frame from the axis and move to a 10-degree angle.")
+def damped_sine(t, A, zeta, wn, phi, c):
+    """ Mathematical model for damped harmonic oscillator. """
+    wd = wn * np.sqrt(1 - zeta**2)
+    return A * np.exp(-zeta * wn * t) * np.cos(wd * t + phi) + c
+
+def motor_step_response(t, v_ss, tau):
+    """ Mathematical model for first-order system step response. """
+    return v_ss * (1 - np.exp(-t / tau))
+
+def run_pendulum_sysid(esp32):
+    print("\n--- PENDULUM TEST ($I_b$, $C_b$) ---")
+    print("Instruction: Hang the body upside-down rigidly. Bring it to a ~15 degree angle.")
     
-    user_input = input("Type 'GO' to start the test, or anything else to abort: ")
-    if user_input.strip().lower() != 'go':
-        print("Test aborted. Returning to terminal.")
+    if input("Type 'GO' when ready (or 'Q' to abort): ").strip().upper() != 'GO':
         return
 
-    print("\nStarting test... Recording data for 10 seconds. DO NOT TOUCH!")
-    
-    # ניקוי חוצץ התקשורת ושליחת פקודת התחלה
+    print("Executing... Capturing data for 10 seconds. DO NOT TOUCH.")
     esp32.reset_input_buffer()
     esp32.write(b'START_PENDULUM\n')
     
-    times = []
-    pitches = []
-    
+    times, pitches = [], []
     start_wait = time.time()
-    while time.time() - start_wait < 12.0: # קצת ספר לביטחון
+    
+    while time.time() - start_wait < 12.0:
         if esp32.in_waiting > 0:
             line = esp32.readline().decode('utf-8', errors='ignore').strip()
-            if line == "TEST_DONE":
-                break
+            if line == "TEST_DONE": break
             if line.startswith("TEST_DATA:"):
-                parts = line.replace("TEST_DATA:", "").split(",")
-                if len(parts) == 2:
-                    try:
-                        times.append(int(parts[0]) / 1000.0) # המרה לשניות
-                        pitches.append(float(parts[1]))
-                    except ValueError:
-                        pass
+                try:
+                    parts = line.split(":", 1)[1].split(",")
+                    times.append(int(parts[0]) / 1000.0)
+                    pitches.append(float(parts[1]))
+                except (IndexError, ValueError): pass
 
     if len(pitches) < 50:
-        print("Error: Not enough data received. Check sensor connection.")
+        print("[!] Error: Insufficient data. Test failed.")
         return
 
-    print("Data collection complete! Analyzing physics...")
-
-    # יישור ציר הזמן לאפס
     times = np.array(times) - times[0]
     pitches = np.array(pitches)
 
-    # מציאת נקודות הקיצון (Peaks) כדי לחשב את זמן המחזור
-    # משתמשים במרחק מינימלי של 50 דגימות כדי לא לתפוס רעשים
-    peaks, _ = find_peaks(pitches, distance=50) 
-    
-    if len(peaks) < 2:
-        print("Error: Could not detect clear oscillations. Did you swing it?")
+    # Initial guesses: Amplitude, Damping Ratio, Natural Freq, Phase, Offset
+    p0 = [(np.max(pitches) - np.min(pitches))/2, 0.05, 2.0 * np.pi / 1.0, 0, np.mean(pitches)]
+    bounds = ([0, 0, 0, -np.pi, -180], [180, 1.0, 20.0, np.pi, 180])
+
+    try:
+        popt, _ = curve_fit(damped_sine, times, pitches, p0=p0, bounds=bounds)
+        fitted_curve = damped_sine(times, *popt)
+        r2 = r2_score(pitches, fitted_curve)
+    except Exception as e:
+        print(f"[!] Curve fitting failed: {e}")
         return
 
-    # חישוב זמן המחזור הממוצע (T)
-    peak_times = times[peaks]
-    T_avg = np.mean(np.diff(peak_times))
-    print(f"-> Measured Oscillation Period (T): {T_avg:.3f} seconds")
-
-    # שליפת המשתנים הפיזיקליים מקובץ ה-JSON (אם קיים)
-    m_f = 0.5   # משקל שלדה חלופי אם אין JSON
-    l_f = 0.075 # מרכז כובד חלופי אם אין JSON
-    g = 9.81
+    print(f"\n--- Analysis Complete (Accuracy R^2: {r2:.4f}) ---")
     
-    if os.path.exists(JSON_PATH):
-        try:
-            with open(JSON_PATH, 'r') as f:
-                data = json.load(f)
-                m_f = data.get("physical_params", {}).get("m_f", m_f)
-                l_f = data.get("physical_params", {}).get("l_f", l_f)
-        except: pass
+    if r2 < 0.90:
+        print("[!] WARNING: Data quality is poor (R^2 < 0.90). Check physical setup.")
+    else:
+        # Extract physical properties based on known constants
+        params = json.load(open(JSON_PATH))['physical_params']
+        M_term = (params['m_b'] * params['l_b'] + params['m_w'] * params['l']) * params['g']
+        
+        zeta, wn = popt[1], popt[2]
+        I_tot = M_term / (wn**2)
+        I_b = I_tot - (params['m_w'] * (params['l']**2))
+        C_b = 2 * zeta * wn * I_tot
 
-    # המתמטיקה של המטוטלת
-    I_f = ( (T_avg**2) * m_f * g * l_f ) / (4 * (np.pi**2))
-    
-    print(f"-> Using m_f={m_f}kg, l_f={l_f}m")
-    print(f"-> Calculated I_f: {I_f:.6f} kg*m^2")
+        print(f"-> Calculated Body Inertia ($I_b$): {I_b:.6f} kg*m^2")
+        print(f"-> Calculated Damping Coeff ($C_b$): {C_b:.6f} kg*m^2/s")
 
-    # מראה ליוזר גרף כדי להוכיח שהמדידה מדויקת
-    print("\nOpening graph. Close the graph window to continue and save...")
     plt.figure(figsize=(10, 5))
-    plt.title("Pendulum Test - Pitch Angle Over Time")
-    plt.plot(times, pitches, label="Raw Sensor Data", color="blue")
-    plt.plot(times[peaks], pitches[peaks], "rx", markersize=10, label="Detected Peaks (Period T)")
-    plt.xlabel("Time (Seconds)")
-    plt.ylabel("Pitch Angle (Degrees)")
-    plt.grid(True)
+    plt.plot(times, pitches, label="Raw Data")
+    plt.plot(times, fitted_curve, 'r--', label="Mathematical Fit")
+    plt.title(f"Pendulum Fit (R^2: {r2:.3f})")
     plt.legend()
-    plt.show() # התוכנית תעצור כאן עד שתסגור את החלון
+    plt.show(block=False)
 
-    # שמירה ל-JSON
-    params = {}
-    if os.path.exists(JSON_PATH):
-        with open(JSON_PATH, 'r') as f:
-            params = json.load(f)
+    if input("\nAccept and save these parameters to JSON? (Y/N): ").strip().upper() == 'Y':
+        data = json.load(open(JSON_PATH))
+        data['physical_params']['I_b'] = I_b
+        data['physical_params']['C_b'] = C_b
+        json.dump(data, open(JSON_PATH, 'w'), indent=4)
+        print("Saved successfully.")
     
-    if "physical_params" not in params:
-        params["physical_params"] = {}
-        
-    params["physical_params"]["I_f"] = I_f
-    
-    with open(JSON_PATH, 'w') as f:
-        json.dump(params, f, indent=4)
-        
-    print("\nSaved successfully to cube_params.json!")
-    print("Moving back to terminal mode...\n")
+    plt.close()
 
-# ==========================================
-# הטרמינל הראשי (נשאר דומה, עם תוספת ההאזנה ל-get_params)
-# ==========================================
+def run_motor_sysid(esp32):
+    print("\n--- MOTOR TEST ($K_m$, $C_w$) ---")
+    print("Instruction: Rigidly FIX the pendulum body so it CANNOT move.")
+    
+    if input("Type 'GO' when ready (or 'Q' to abort): ").strip().upper() != 'GO':
+        return
+
+    print("Executing step response... DO NOT TOUCH.")
+    esp32.reset_input_buffer()
+    esp32.write(b'START_MOTOR_TEST\n')
+    
+    times, velocities = [], []
+    start_wait = time.time()
+    
+    while time.time() - start_wait < 5.0:
+        if esp32.in_waiting > 0:
+            line = esp32.readline().decode('utf-8', errors='ignore').strip()
+            if line == "TEST_DONE": break
+            if line.startswith("MOTOR_DATA:"):
+                try:
+                    parts = line.split(":", 1)[1].split(",")
+                    times.append(int(parts[0]) / 1000.0)
+                    velocities.append(float(parts[1]))
+                except (IndexError, ValueError): pass
+
+    if len(velocities) < 20:
+        print("[!] Error: Insufficient motor data.")
+        return
+
+    times = np.array(times) - times[0]
+    velocities = np.array(velocities)
+
+    # Assume a known constant input current U (e.g., 1.0 Ampere)
+    U_step = 1.0 
+
+    p0 = [np.max(velocities), 0.1]
+    try:
+        popt, _ = curve_fit(motor_step_response, times, velocities, p0=p0)
+        fitted_curve = motor_step_response(times, *popt)
+        r2 = r2_score(velocities, fitted_curve)
+    except Exception as e:
+        print(f"[!] Curve fitting failed: {e}")
+        return
+
+    print(f"\n--- Motor Analysis Complete (Accuracy R^2: {r2:.4f}) ---")
+    
+    if r2 < 0.90:
+        print("[!] WARNING: Poor data fit. Is the body rigidly fixed?")
+    else:
+        params = json.load(open(JSON_PATH))['physical_params']
+        I_w = params['I_w'] # Assuming Wheel Inertia is precisely known from CAD
+        
+        v_ss, tau = popt[0], popt[1]
+        C_w = I_w / tau
+        K_m = (v_ss * C_w) / U_step
+
+        print(f"-> Calculated Wheel Damping ($C_w$): {C_w:.6f}")
+        print(f"-> Calculated Motor Constant ($K_m$): {K_m:.4f} Nm/A")
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(times, velocities, label="Raw Velocity")
+    plt.plot(times, fitted_curve, 'r--', label="Step Response Fit")
+    plt.title(f"Motor Step Response (R^2: {r2:.3f})")
+    plt.legend()
+    plt.show(block=False)
+
+    if input("\nAccept and save these parameters to JSON? (Y/N): ").strip().upper() == 'Y':
+        data = json.load(open(JSON_PATH))
+        data['physical_params']['C_w'] = C_w
+        data['physical_params']['K_m'] = K_m
+        json.dump(data, open(JSON_PATH, 'w'), indent=4)
+        print("Saved successfully.")
+    
+    plt.close()
+
 def run_serial_terminal():
     com_port = find_esp32_port()
     if not com_port:
@@ -162,13 +203,10 @@ def run_serial_terminal():
         print(f"Error: {e}")
         return
 
-    print("\n=== ESP32 USB-Serial Terminal ===")
-    print("Type 'get_params' to enter System Identification Wizard.")
-    print("Type 'show'/'hide' for sensor stream. Type 'exit' to quit.\n")
-
+    print("\n=== SYSTEM ID WIZARD ===")
+    
     stop_event = threading.Event()
-    show_sensor = [False] 
-    wizard_active = [False] # דגל שמונע מהתהליכון להדפיס תוך כדי טסט
+    wizard_active = [False]
 
     def receive_loop():
         while not stop_event.is_set():
@@ -177,13 +215,8 @@ def run_serial_terminal():
                     if esp32.in_waiting > 0:
                         line = esp32.readline().decode('utf-8', errors='ignore').strip()
                         if line:
-                            if line.startswith("Pitch:"):
-                                if show_sensor[0]:
-                                    print(f"\r[Sensor] {line}\nCMD> ", end="", flush=True)
-                            else:
-                                print(f"\r[ESP] {line}\nCMD> ", end="", flush=True)
-                except Exception:
-                    pass
+                            print(f"\r[ESP] {line}\nCMD> ", end="", flush=True)
+                except Exception: pass
             time.sleep(0.01)
 
     recv_thread = threading.Thread(target=receive_loop, daemon=True)
@@ -191,24 +224,21 @@ def run_serial_terminal():
 
     while True:
         try:
-            user_command = input("CMD> ") 
+            print("\nCommands: [1] Pendulum SysID | [2] Motor SysID | [3] Exit")
+            cmd = input("CMD> ").strip()
             
-            if user_command.lower() == 'exit':
+            if cmd == '3' or cmd.lower() == 'exit':
                 break
-            elif user_command.lower() == 'hide':
-                show_sensor[0] = False
-                continue
-            elif user_command.lower() == 'show':
-                show_sensor[0] = True
-                continue
-            elif user_command.lower() == 'get_params':
-                wizard_active[0] = True # משתיק את ההדפסות ברקע
-                run_sysid_wizard(esp32)
-                wizard_active[0] = False # מחזיר את הטרמינל לחיים
-                continue
-                
-            if user_command.strip() != '':
-                esp32.write((user_command + '\n').encode())
+            elif cmd == '1':
+                wizard_active[0] = True
+                run_pendulum_sysid(esp32)
+                wizard_active[0] = False
+            elif cmd == '2':
+                wizard_active[0] = True
+                run_motor_sysid(esp32)
+                wizard_active[0] = False
+            elif cmd != '':
+                esp32.write((cmd + '\n').encode())
                 
         except KeyboardInterrupt:
             break
@@ -217,5 +247,5 @@ def run_serial_terminal():
     esp32.close()
     recv_thread.join(timeout=1.0)
 
-# פונקציות ה-WIFI וה-MAIN נשארות ללא שינוי (כמו בקובץ ששלחת)
-# ...
+if __name__ == "__main__":
+    run_serial_terminal()

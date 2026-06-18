@@ -1,6 +1,6 @@
-#include "servo.h"
+#include "components/servo.h"
 #include <ESP32Servo.h>
-#include "pins.h"
+#include "ESP/pins.h"
 #include <Arduino.h>
 
 static Servo myServo;
