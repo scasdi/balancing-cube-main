@@ -1,7 +1,8 @@
 #include "ESP/get_params.h"
-#include "components/imu_sensor.h"
+#include "ESP/controller.h" // Changed: We now pull telemetry from the controller safely
 #include "ESP/comms.h"
 #include <Arduino.h>
+#include <cmath> // Added for fabs()
 
 static bool active = false;
 static unsigned long endTime = 0;
@@ -25,6 +26,9 @@ bool get_params_is_active() {
     return active;
 }
 
+/**
+ * @brief Non-blocking update loop for telemetry parameter fetching.
+ */
 void get_params_update(unsigned long currentMillis) {
     if (!active) return;
 
@@ -32,12 +36,18 @@ void get_params_update(unsigned long currentMillis) {
         if (currentMillis - lastSampleTime >= PENDULUM_SAMPLE_RATE_MS) {
             lastSampleTime = currentMillis;
             
-            imu_data_t imu_raw = get_imu_data();
-            float pitch_deg = imu_raw.pitch * 180.0f / PI;
+            // Changed: Fetching safely from the RTOS controller task, NOT hardware directly
+            float pitch_deg = get_shared_pitch_rad() * 180.0f / PI;
             
-            char buf[64];
-            snprintf(buf, sizeof(buf), "TEST_DATA:%lu,%.2f", currentMillis, pitch_deg);
-            send_comm_message(buf);
+            static float last_pitch_deg = -999.0f; 
+            
+            // Fixed: Using fabs() instead of abs() for floating point arithmetic
+            if (fabs(pitch_deg - last_pitch_deg) > 0.05f) { 
+                char buf[64];
+                snprintf(buf, sizeof(buf), "TEST_DATA:%lu,%.2f", currentMillis, pitch_deg);
+                send_comm_message(buf);
+                last_pitch_deg = pitch_deg; 
+            }
         }
     } else {
         active = false;

@@ -1,3 +1,18 @@
+#include "components/motor_driver.h"
+#include <Arduino.h>
+
+void motor_driver_init() {
+  // no-op stub
+}
+
+float get_motor_velocity() {
+  return 0.0f;
+}
+
+void command_motor_torque(float torque_nm) {
+  // no-op stub
+}
+
 // // Define the UART pins for ESP32 to talk to the ESC
 // #define RXp2 4
 // #define TXp2 5

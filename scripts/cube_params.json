@@ -1,23 +1,27 @@
 {
-  "physical_params": {
-    "g": 9.81,
-    "m_b": 0.419,
-    "m_w": 0.204,
-    "l_b": 0.075,
-    "l": 0.085,
-    "I_b": 0.00334,
-    "I_w": 0.00057,
-    "C_b": 0.00102,
-    "C_w": 0.00005,
-    "K_m": 0.117
-  },
-  "lqr_penalties": {
-    "Q_theta": 1000.0,
-    "Q_theta_dot": 100.0,
-    "Q_wheel_dot": 1.0,
-    "R_motor": 10.0
-  },
-  "calculated_gains": {
-    "K": [0.0, 0.0, 0.0]
-  }
+    "physical_params": {
+        "g": 9.81,
+        "m_b": 0.419,
+        "m_w": 0.204,
+        "l_b": 0.075,
+        "l": 0.085,
+        "I_b": 0.00334,
+        "I_w": 0.00057,
+        "C_b": 0.00102,
+        "C_w": 5e-05,
+        "K_m": 0.117
+    },
+    "lqr_penalties": {
+        "Q_theta": 1000.0,
+        "Q_theta_dot": 100.0,
+        "Q_wheel_dot": 1.0,
+        "R_motor": 10.0
+    },
+    "calculated_gains": {
+        "K": [
+            0.0,
+            0.0,
+            0.0
+        ]
+    }
 }
