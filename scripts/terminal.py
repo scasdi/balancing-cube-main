@@ -1,8 +1,3 @@
-"""!
-@file terminal.py
-@brief Serial terminal and system ID wizard for the balancing cube.
-"""
-
 import os
 import time
 import json
@@ -269,13 +264,14 @@ def run_motor_sysid(esp32):
 
 def find_esp32_port():
     """!
-    @brief Scans available serial ports and identifies the one connected to the ESP32.
+    @brief Scans available serial ports and identifies the ESP32 (USB or Bluetooth).
     @return String representing the COM port, or None if not found.
     """
     ports = serial.tools.list_ports.comports()
     for port in ports:
         desc = port.description.lower()
-        if "usb" in desc or "uart" in desc or "ch340" in desc or "cp210" in desc:
+        hwid = port.hwid.lower()
+        if any(kw in desc or kw in hwid for kw in ["usb", "uart", "ch340", "cp210", "bluetooth", "bthenum"]):
             return port.device
     return None
 
@@ -292,16 +288,22 @@ def print_help_menu():
     print(" [6] Start Balancing")
     print(" [7] Stop Motors")
     print(" [8] Exit")
+    print(" [10] Set Motor Speed (%) - ex: 10 -60")
     print("------------------------------")
 
 def run_serial_terminal():
     """!
     @brief Main routine for the serial terminal, handling communication threads and user input.
     """
+    print("\n[PC] Starting Balancing Cube Terminal...")
     com_port = find_esp32_port()
-    if not com_port:
-        print("Error: No ESP32 detected via USB.")
-        return
+    
+    while not com_port:
+        print("\r[PC] Searching for ESP32 (Bluetooth/USB)...", end="", flush=True)
+        time.sleep(1)
+        com_port = find_esp32_port()
+        
+    print(f"\n[PC] Automatically connected to -> {com_port}")
         
     esp32 = serial.Serial(com_port, 115200, timeout=0.1)
     time.sleep(2) 
@@ -333,6 +335,7 @@ def run_serial_terminal():
     while True:
         try:
             cmd = input("CMD> ").strip()
+            
             if cmd in ['8', 'exit']: break
             
             elif cmd == '1':
@@ -360,6 +363,9 @@ def run_serial_terminal():
             elif cmd == '7':
                 esp32.write(b'STOP\n')
                 
+            elif cmd.startswith('10'):
+                esp32.write((cmd + '\n').encode())
+
             elif cmd != '':
                 esp32.write((cmd + '\n').encode())
                 

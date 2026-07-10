@@ -1,8 +1,3 @@
-/**
- * @file commands.cpp
- * @brief Implementation of command processing and communication handling.
- */
-
 #include "ESP/commands.h"
 #include "ESP/comms.h"
 #include "ESP/get_params.h"
@@ -11,30 +6,15 @@
 #include "ESP/storage.h"
 #include "ESP/pins.h"
 #include "components/servo.h"
+#include "components/motor_driver.h"
 #include <Arduino.h>
 
-/**
- * @brief Stores the previous state of the user button for edge detection.
- */
 static int last_button_state = LOW;
-
-/**
- * @brief Stores the last time the button state changed for debouncing.
- */
 static unsigned long last_debounce_time = 0;
-
-/**
- * @brief Debounce delay in milliseconds.
- */
 static const unsigned long DEBOUNCE_DELAY_MS = 50;
 
-/**
- * @brief Processes an incoming command string and executes the corresponding action.
- * @param command The incoming command string.
- * @return String containing the response message.
- */
 String process_command(String command) {
-    command.trim(); 
+    command.trim();
 
     if (command.startsWith("SET_GAINS:")) {
         String gains_str = command.substring(10);
@@ -51,6 +31,13 @@ String process_command(String command) {
             return "GAINS_SYNC_OK";
         }
         return "ERROR: INVALID_GAIN_FORMAT";
+    }
+    else if (command.startsWith("10 ")) {
+        float speed_percent = command.substring(3).toFloat();
+        command_motor_pwm_speed(speed_percent);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "SPEED_SET: %.1f%%", speed_percent);
+        return String(buf);
     }
     else if (command == "BALANCE") {
         set_state(EDGE_BALANCE);
@@ -74,46 +61,40 @@ String process_command(String command) {
     return "UNKNOWN_CMD: " + command;
 }
 
-/**
- * @brief Initializes the command module and hardware button pin.
- */
 void commands_init() {
     pinMode(BUTTON, INPUT);
     last_button_state = digitalRead(BUTTON);
 }
 
-/**
- * @brief Updates the command module, handling incoming serial data and hardware button events.
- * @param currentMillis The current system time in milliseconds.
- */
 void commands_update(unsigned long currentMillis) {
-    // --- Button Edge Detection & Debounce ---
     int current_button_state = digitalRead(BUTTON);
-    
+
     if (current_button_state != last_button_state) {
         last_debounce_time = currentMillis;
     }
 
     if ((currentMillis - last_debounce_time) > DEBOUNCE_DELAY_MS) {
         static int button_validated_state = LOW;
+
         if (current_button_state != button_validated_state) {
             button_validated_state = current_button_state;
-            
+
             if (button_validated_state == HIGH) {
                 send_comm_message("BUTTON_PRESSED");
-                servo_jump(); // <-- הקריאה לסרוו לקפוץ!
+                servo_jump(); 
             }
         }
     }
     last_button_state = current_button_state;
 
-    // --- Serial Command Handling ---
+    check_bluetooth_commands();
+
     if (Serial.available()) {
         String incoming_cmd = Serial.readStringUntil('\n');
         incoming_cmd.trim();
         if (incoming_cmd.length() > 0) {
             if (incoming_cmd == "START_PENDULUM") {
-                set_state(SYS_ID_TEST); 
+                set_state(SYS_ID_TEST);
                 get_params_start(10000);
             } 
             else if (incoming_cmd == "START_MOTOR_TEST") {

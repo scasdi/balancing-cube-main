@@ -1,0 +1,1548 @@
+
+
+==================================================
+FILE: .\bunch_code.py
+==================================================
+import os
+
+OUTPUT_FILE = "all_code.txt"
+# התיקיות שאנחנו רוצים להיכנס אליהן מתוך השורש
+ALLOWED_DIRS = {"src", "include", "scripts"}
+
+with open(OUTPUT_FILE, "w", encoding="utf-8") as outfile:
+    for root, dirs, files in os.walk("."):
+        
+        # אם אנחנו בתיקיית השורש, נשאיר ברשימה רק את התיקיות המורשות
+        # פעולה זו גורמת ל-os.walk להתעלם לחלוטין מכל שאר התיקיות (כמו .pio, lib וכו')
+        if root == ".":
+            dirs[:] = [d for d in dirs if d in ALLOWED_DIRS]
+            
+        for file in files:
+            # מדלג על קובץ הפלט עצמו כדי שלא ישכפל את עצמו
+            if file == OUTPUT_FILE:
+                continue
+                
+            # סינון לפי סוגי קבצים (הוספתי .ini עבור platformio.ini ו-.c ליתר ביטחון)
+            if file.endswith((".cpp", ".c", ".h", ".py", ".json", ".ini")):
+                filepath = os.path.join(root, file)
+                outfile.write(f"\n\n{'='*50}\nFILE: {filepath}\n{'='*50}\n")
+                try:
+                    with open(filepath, "r", encoding="utf-8") as infile:
+                        outfile.write(infile.read())
+                except Exception as e:
+                    outfile.write(f"Error reading file: {e}\n")
+                    
+print(f"Created {OUTPUT_FILE} successfully! Upload this file.")
+
+==================================================
+FILE: .\platformio.ini
+==================================================
+; PlatformIO Project Configuration File
+;
+;   Build options: build flags, source filter
+;   Upload options: custom upload port, speed and extra flags
+;   Library options: dependencies, extra library storages
+;   Advanced options: extra scripting
+;
+; Please visit documentation for the other options and examples
+; https://docs.platformio.org/page/projectconf.html
+
+[env:esp32dev]
+platform = espressif32
+board = esp32dev
+framework = arduino
+monitor_speed = 115200
+monitor_filters = send_on_enter
+monitor_echo = yes
+lib_deps =
+    adafruit/Adafruit BNO08x @ ^1.2.5
+    esphome/ESPAsyncWebServer-esphome @ ^3.1.0
+    madhephaestus/ESP32Servo @ ^3.0.5
+    askuric/Simple FOC
+
+==================================================
+FILE: .\include\components\imu_sensor.h
+==================================================
+#pragma once
+#include <Adafruit_BNO08x.h>
+
+struct imu_data_t {
+    float pitch;
+    float pitch_rate;
+};
+
+bool init_IMU();
+imu_data_t get_imu_data();
+
+==================================================
+FILE: .\include\components\motor_driver.h
+==================================================
+#pragma once
+
+void motor_driver_init();
+float get_motor_velocity();
+void command_motor_torque(float torque_nm);
+
+==================================================
+FILE: .\include\components\pins_driver.h
+==================================================
+#pragma once
+
+
+==================================================
+FILE: .\include\components\servo.h
+==================================================
+#pragma once
+#include <Arduino.h>
+
+void servo_init();
+void servo_update(unsigned long currentMillis);
+void servo_jump();
+bool servo_is_jumped();
+
+
+==================================================
+FILE: .\include\ESP\commands.h
+==================================================
+#pragma once
+#include <Arduino.h>
+
+// central command processor (keeps existing behavior)
+String process_command(String command);
+
+// Initialize command subsystem (button, serial handling)
+void commands_init();
+
+// Called from main loop with current millis
+void commands_update(unsigned long currentMillis);
+
+
+==================================================
+FILE: .\include\ESP\comms.h
+==================================================
+#pragma once
+#include <Arduino.h>
+
+// Unified communication helpers. Prefers WiFi when available, falls back to Serial.
+void comms_init();
+void send_comm_message(const char* msg);
+
+
+==================================================
+FILE: .\include\ESP\controller.h
+==================================================
+#ifndef ESP_CONTROLLER_H
+#define ESP_CONTROLLER_H
+
+#include <Arduino.h>
+
+// 1. Define the enum so every file that includes this header knows what it is
+enum cube_state {
+    IDLE,
+    EDGE_BALANCE,
+    FALL_TO_IDLE,
+    SYS_ID_TEST,
+    CALIBRATING
+};
+
+// 2. Declare external access to the current state (if needed elsewhere)
+extern cube_state current_state;
+
+// 3. Function Prototypes (No bodies here!)
+float get_shared_pitch_rad();
+void set_state(cube_state new_state);
+void init_controller();
+
+#endif // ESP_CONTROLLER_H
+
+==================================================
+FILE: .\include\ESP\get_params.h
+==================================================
+#pragma once
+#include <Arduino.h>
+
+void get_params_init();
+void get_params_update(unsigned long currentMillis);
+void get_params_start(unsigned long duration_ms);
+bool get_params_is_active();
+
+
+==================================================
+FILE: .\include\ESP\LQR.h
+==================================================
+#ifndef LQR_H
+#define LQR_H
+
+/**
+ * @brief Initializes the LQR controller and loads saved gains from storage.
+ */
+void lqr_init();
+
+/**
+ * @brief Updates the LQR gains dynamically in RAM.
+ */
+void lqr_set_gains(float k1, float k2, float k3);
+
+/**
+ * @brief Calculates the required motor torque based on current state variables.
+ * @param theta_b Pitch angle of the body (radians).
+ * @param theta_b_dot Pitch angular velocity of the body (rad/s).
+ * @param theta_w_dot Angular velocity of the reaction wheel (rad/s).
+ * @return Commanded motor torque (Nm).
+ */
+float calculate_lqr_torque(float theta_b, float theta_b_dot, float theta_w_dot);
+
+#endif
+
+==================================================
+FILE: .\include\ESP\network_config.h
+==================================================
+#pragma once
+
+static constexpr char WIFI_AP_IP[] = "192.168.4.1";
+static constexpr int UDP_PORT = 1234;
+
+
+==================================================
+FILE: .\include\ESP\pins.h
+==================================================
+#pragma once
+
+static constexpr int SCL_imu = 22;
+static constexpr int SDA_imu = 21;
+static constexpr int LED_Y = 23;
+static constexpr int LED_O = 2;
+static constexpr int BUTTON = 36;
+static const int servoPin = 13;
+void init_pins();
+
+
+==================================================
+FILE: .\include\ESP\storage.h
+==================================================
+#ifndef STORAGE_H
+#define STORAGE_H
+
+/**
+ * @brief Initializes the Non-Volatile Storage (NVS) partition.
+ */
+void storage_init();
+
+/**
+ * @brief Saves LQR control gains to NVS.
+ */
+void storage_save_gains(float k1, float k2, float k3);
+
+/**
+ * @brief Loads LQR control gains from NVS.
+ */
+void storage_load_gains(float* k1, float* k2, float* k3);
+
+/**
+ * @brief Saves the static pitch offset calibration to NVS.
+ */
+void storage_save_pitch_offset(float offset);
+
+/**
+ * @brief Loads the static pitch offset calibration from NVS.
+ * @return Pitch offset in radians.
+ */
+float storage_load_pitch_offset();
+
+#endif
+
+==================================================
+FILE: .\include\ESP\web_server.h
+==================================================
+#pragma once
+#include <ESPAsyncWebServer.h>
+
+void init_web_server();
+extern AsyncWebServer server;
+
+
+==================================================
+FILE: .\include\ESP\wifi_ap.h
+==================================================
+#pragma once
+#include <WiFi.h>
+#include "ESP/pins.h"
+
+void init_wifi_AP();
+void check_wifi_commands();
+bool wifi_has_client();
+bool send_wifi_message(const char* msg);
+
+
+==================================================
+FILE: .\scripts\cube_params.json
+==================================================
+{
+    "physical_params": {
+        "g": 9.81,
+        "m_b": 0.419,
+        "m_w": 0.204,
+        "l_b": 0.075,
+        "l": 0.085,
+        "I_b": 0.00334,
+        "I_w": 0.00057,
+        "C_b": 0.00102,
+        "C_w": 5e-05,
+        "K_m": 0.117
+    },
+    "lqr_penalties": {
+        "Q_theta": 1000.0,
+        "Q_theta_dot": 100.0,
+        "Q_wheel_dot": 1.0,
+        "R_motor": 10.0
+    },
+    "calculated_gains": {
+        "K": [
+            0.0,
+            0.0,
+            0.0
+        ]
+    }
+}
+
+==================================================
+FILE: .\scripts\LQR.py
+==================================================
+import numpy as np
+import control as ct
+import json
+import os
+
+CONFIG_FILE = "cube_params.json"
+
+def load_params():
+    if not os.path.exists(CONFIG_FILE):
+        raise FileNotFoundError(f"Missing {CONFIG_FILE}")
+    with open(CONFIG_FILE, 'r') as f:
+        return json.load(f)
+
+def save_params(data):
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(data, f, indent=4)
+
+def calculate_lqr():
+    data = load_params()
+    p = data["physical_params"]
+    q = data["lqr_penalties"]
+
+    # Extract dynamic parameters
+    g, m_b, m_w = p["g"], p["m_b"], p["m_w"]
+    l_b, l = p["l_b"], p["l"]
+    I_b, I_w = p["I_b"], p["I_w"]
+    C_b, C_w = p["C_b"], p["C_w"]
+    K_m = p["K_m"]
+
+    # Pre-calculate common denominator terms
+    M_term = (m_b * l_b + m_w * l) * g
+    I_tot = I_b + m_w * (l ** 2)
+
+    # State matrix A (3x3)
+    A = np.array([
+        [0, 1, 0],
+        [M_term / I_tot, -C_b / I_tot, C_w / I_tot],
+        [-M_term / I_tot, C_b / I_tot, -C_w * (I_b + I_w + m_w * l**2) / (I_w * I_tot)]
+    ])
+
+    # Input matrix B (3x1)
+    B = np.array([
+        [0],
+        [-K_m / I_tot],
+        [K_m * (I_b + I_w + m_w * l**2) / (I_w * I_tot)]
+    ])
+
+    # Cost matrices
+    Q = np.diag([q["Q_theta"], q["Q_theta_dot"], q["Q_wheel_dot"]])
+    R = np.array([[q["R_motor"]]])
+
+    # LQR Calculation
+    K, S, E = ct.lqr(A, B, Q, R)
+
+    # Save format
+    k_list = [float(K[0][0]), float(K[0][1]), float(K[0][2])]
+    data["calculated_gains"]["K"] = k_list
+    save_params(data)
+
+    print("\n=== System Updated Successfully ===")
+    print(f"Calculated A Matrix:\n{A}")
+    print(f"Calculated B Matrix:\n{B}")
+    print(f"New K Matrix saved: {k_list}")
+
+if __name__ == "__main__":
+    calculate_lqr()
+
+==================================================
+FILE: .\scripts\terminal.py
+==================================================
+"""!
+@file terminal.py
+@brief Serial terminal and system ID wizard for the balancing cube.
+"""
+
+import os
+import time
+import json
+import threading
+import numpy as np
+import serial
+import serial.tools.list_ports
+import matplotlib.pyplot as plt
+import control as ct
+from scipy.optimize import curve_fit
+
+## Absolute path to the script directory.
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+## Absolute path to the configuration JSON file.
+CONFIG_FILE = os.path.join(SCRIPT_DIR, "cube_params.json")
+
+def load_params():
+    """!
+    @brief Loads the physical and control parameters from the JSON configuration file.
+    @return Dictionary containing the configuration data.
+    @throws FileNotFoundError If the configuration file does not exist.
+    """
+    if not os.path.exists(CONFIG_FILE):
+        raise FileNotFoundError(f"Missing {CONFIG_FILE}")
+    with open(CONFIG_FILE, 'r') as f:
+        return json.load(f)
+
+def save_and_sync_params(esp32, data):
+    """!
+    @brief Saves parameters to the JSON file and transmits the updated gains to the ESP32.
+    @param esp32 Active serial connection object.
+    @param data Dictionary containing the parameters to save and sync.
+    """
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(data, f, indent=4)
+    
+    k = data["calculated_gains"]["K"]
+    sync_cmd = f"SET_GAINS:{k[0]},{k[1]},{k[2]}\n"
+    if esp32 and esp32.is_open:
+        esp32.write(sync_cmd.encode('utf-8'))
+        print(f"[PC] Synced to ESP -> {sync_cmd.strip()}")
+    else:
+        print("[PC] JSON saved, but ESP32 not connected for sync.")
+
+def calculate_lqr_and_sync(esp32):
+    """!
+    @brief Calculates optimal LQR gains based on physical parameters and penalties, then syncs them.
+    @param esp32 Active serial connection object.
+    """
+    print("\n--- CALCULATING LQR GAINS ---")
+    data = load_params()
+    p = data["physical_params"]
+    q = data["lqr_penalties"]
+
+    g, m_b, m_w = p["g"], p["m_b"], p["m_w"]
+    l_b, l = p["l_b"], p["l"]
+    I_b, I_w = p["I_b"], p["I_w"]
+    C_b, C_w = p["C_b"], p["C_w"]
+    K_m = p["K_m"]
+
+    M_term = (m_b * l_b + m_w * l) * g
+    I_tot = I_b + m_w * (l ** 2)
+
+    A = np.array([
+        [0, 1, 0],
+        [M_term / I_tot, -C_b / I_tot, C_w / I_tot],
+        [-M_term / I_tot, C_b / I_tot, -C_w * (I_b + I_w + m_w * l**2) / (I_w * I_tot)]
+    ])
+
+    B = np.array([
+        [0],
+        [-K_m / I_tot],
+        [K_m * (I_b + I_w + m_w * l**2) / (I_w * I_tot)]
+    ])
+
+    Q = np.diag([q["Q_theta"], q["Q_theta_dot"], q["Q_wheel_dot"]])
+    R = np.array([[q["R_motor"]]])
+
+    try:
+        K, _, _ = ct.lqr(A, B, Q, R)
+        k_list = [float(K[0][0]), float(K[0][1]), float(K[0][2])]
+        data["calculated_gains"]["K"] = k_list
+        save_and_sync_params(esp32, data)
+        print(f"LQR Gains updated: {k_list}")
+    except Exception as e:
+        print(f"[!] LQR Calculation failed: {e}")
+
+def r2_score(y_true, y_pred):
+    """!
+    @brief Calculates the R-squared statistical measure of fit.
+    @param y_true Array of actual observed values.
+    @param y_pred Array of predicted values from the model.
+    @return Float representing the R-squared score.
+    """
+    y_true = np.array(y_true)
+    y_pred = np.array(y_pred)
+    ss_res = np.sum((y_true - y_pred) ** 2)
+    ss_tot = np.sum((y_true - np.mean(y_true)) ** 2)
+    return 1.0 - ss_res / ss_tot if ss_tot != 0 else 0.0
+
+def damped_sine(t, A, zeta, wn, phi, c):
+    """!
+    @brief Mathematical model function for a damped harmonic oscillator.
+    @param t Time array.
+    @param A Initial amplitude.
+    @param zeta Damping ratio.
+    @param wn Natural frequency.
+    @param phi Phase angle.
+    @param c Vertical offset.
+    @return Array of calculated values matching the time array.
+    """
+    wd = wn * np.sqrt(1 - zeta**2)
+    return A * np.exp(-zeta * wn * t) * np.cos(wd * t + phi) + c
+
+def motor_step_response(t, v_ss, tau):
+    """!
+    @brief Mathematical model function for a first-order system step response.
+    @param t Time array.
+    @param v_ss Steady-state velocity.
+    @param tau Time constant.
+    @return Array of calculated values matching the time array.
+    """
+    return v_ss * (1 - np.exp(-t / tau))
+
+def run_pendulum_sysid(esp32):
+    """!
+    @brief Executes the pendulum system identification routine to calculate body inertia and damping.
+    @param esp32 Active serial connection object.
+    """
+    print("\n--- PENDULUM TEST ($I_b$, $C_b$) ---")
+    print("Instruction: Hang the body upside-down rigidly. Bring it to a ~15 degree angle.")
+    if input("Type 'GO' when ready (or 'Q' to abort): ").strip().upper() != 'GO': return
+
+    print("Executing... Capturing data for 10 seconds. DO NOT TOUCH.")
+    esp32.reset_input_buffer()
+    esp32.write(b'START_PENDULUM\n')
+    
+    times, pitches = [], []
+    start_wait = time.time()
+    
+    while time.time() - start_wait < 12.0:
+        if esp32.in_waiting > 0:
+            line = esp32.readline().decode('utf-8', errors='ignore').strip()
+            if line == "TEST_DONE": break
+            if line.startswith("TEST_DATA:"):
+                try:
+                    parts = line.split(":", 1)[1].split(",")
+                    times.append(int(parts[0]) / 1000.0)
+                    pitches.append(float(parts[1]))
+                except: pass
+
+    if len(pitches) < 50:
+        print("[!] Error: Insufficient data.")
+        return
+
+    times = np.array(times) - times[0]
+    pitches = np.array(pitches)
+
+    p0 = [(np.max(pitches) - np.min(pitches))/2, 0.05, 2.0 * np.pi / 1.0, 0, np.mean(pitches)]
+    bounds = ([0, 0, 0, -np.pi, -180], [180, 1.0, 20.0, np.pi, 180])
+
+    try:
+        popt, _ = curve_fit(damped_sine, times, pitches, p0=p0, bounds=bounds)
+        fitted_curve = damped_sine(times, *popt)
+        r2 = r2_score(pitches, fitted_curve)
+    except Exception as e:
+        print(f"[!] Curve fitting failed: {e}")
+        return
+    
+    if r2 >= 0.90:
+        data = load_params()
+        params = data['physical_params']
+        M_term = (params['m_b'] * params['l_b'] + params['m_w'] * params['l']) * params['g']
+        
+        zeta, wn = popt[1], popt[2]
+        I_tot = M_term / (wn**2)
+        I_b = I_tot - (params['m_w'] * (params['l']**2))
+        C_b = 2 * zeta * wn * I_tot
+
+        print(f"Calculated I_b: {I_b:.6f} | C_b: {C_b:.6f}")
+        if input("Save and recalculate LQR? (Y/N): ").strip().upper() == 'Y':
+            data['physical_params']['I_b'] = I_b
+            data['physical_params']['C_b'] = C_b
+            save_and_sync_params(esp32, data)
+            calculate_lqr_and_sync(esp32)
+
+def run_motor_sysid(esp32):
+    """!
+    @brief Executes the motor system identification routine to calculate wheel damping and motor constant.
+    @param esp32 Active serial connection object.
+    """
+    print("\n--- MOTOR TEST ($K_m$, $C_w$) ---")
+    print("Instruction: Rigidly FIX the pendulum body so it CANNOT move.")
+    
+    if input("Type 'GO' when ready (or 'Q' to abort): ").strip().upper() != 'GO':
+        return
+
+    print("Executing step response... DO NOT TOUCH.")
+    esp32.reset_input_buffer()
+    esp32.write(b'START_MOTOR_TEST\n')
+    
+    times, velocities = [], []
+    start_wait = time.time()
+    
+    while time.time() - start_wait < 5.0:
+        if esp32.in_waiting > 0:
+            line = esp32.readline().decode('utf-8', errors='ignore').strip()
+            if line == "TEST_DONE": break
+            if line.startswith("MOTOR_DATA:"):
+                try:
+                    parts = line.split(":", 1)[1].split(",")
+                    times.append(int(parts[0]) / 1000.0)
+                    velocities.append(float(parts[1]))
+                except (IndexError, ValueError): pass
+
+    if len(velocities) < 20:
+        print("[!] Error: Insufficient motor data.")
+        return
+
+    times = np.array(times) - times[0]
+    velocities = np.array(velocities)
+
+    U_step = 1.0 
+
+    p0 = [np.max(velocities), 0.1]
+    try:
+        popt, _ = curve_fit(motor_step_response, times, velocities, p0=p0)
+        fitted_curve = motor_step_response(times, *popt)
+        r2 = r2_score(velocities, fitted_curve)
+    except Exception as e:
+        print(f"[!] Curve fitting failed: {e}")
+        return
+
+    print(f"\n--- Motor Analysis Complete (Accuracy R^2: {r2:.4f}) ---")
+    
+    if r2 < 0.90:
+        print("[!] WARNING: Poor data fit. Is the body rigidly fixed?")
+    else:
+        data = load_params()
+        params = data['physical_params']
+        I_w = params['I_w'] 
+        
+        v_ss, tau = popt[0], popt[1]
+        C_w = I_w / tau
+        K_m = (v_ss * C_w) / U_step
+
+        print(f"-> Calculated Wheel Damping (C_w): {C_w:.6f}")
+        print(f"-> Calculated Motor Constant (K_m): {K_m:.4f} Nm/A")
+
+    plt.figure(figsize=(10, 5))
+    plt.plot(times, velocities, label="Raw Velocity")
+    plt.plot(times, fitted_curve, 'r--', label="Step Response Fit")
+    plt.title(f"Motor Step Response (R^2: {r2:.3f})")
+    plt.legend()
+    plt.show(block=False)
+
+    if input("\nAccept and save these parameters to JSON? (Y/N): ").strip().upper() == 'Y':
+        data['physical_params']['C_w'] = C_w
+        data['physical_params']['K_m'] = K_m
+        save_and_sync_params(esp32, data)
+        calculate_lqr_and_sync(esp32)
+    
+    plt.close()
+
+def find_esp32_port():
+    """!
+    @brief Scans available serial ports and identifies the one connected to the ESP32.
+    @return String representing the COM port, or None if not found.
+    """
+    ports = serial.tools.list_ports.comports()
+    for port in ports:
+        desc = port.description.lower()
+        if "usb" in desc or "uart" in desc or "ch340" in desc or "cp210" in desc:
+            return port.device
+    return None
+
+def print_help_menu():
+    """!
+    @brief Displays the list of available commands in the terminal interface.
+    """
+    print("\n--- ESP32 CONTROL TERMINAL ---")
+    print(" [1] Pendulum SysID Test")
+    print(" [2] Motor SysID Test")
+    print(" [3] Recalculate & Sync LQR")
+    print(" [4] Calibrate Zero Offset")
+    print(" [5] Get Current Pitch")
+    print(" [6] Start Balancing")
+    print(" [7] Stop Motors")
+    print(" [8] Exit")
+    print("------------------------------")
+
+def run_serial_terminal():
+    """!
+    @brief Main routine for the serial terminal, handling communication threads and user input.
+    """
+    com_port = find_esp32_port()
+    if not com_port:
+        print("Error: No ESP32 detected via USB.")
+        return
+        
+    esp32 = serial.Serial(com_port, 115200, timeout=0.1)
+    time.sleep(2) 
+    
+    print("\n[PC] Syncing initial JSON parameters to ESP32...")
+    data = load_params()
+    save_and_sync_params(esp32, data)
+    
+    print_help_menu()
+    stop_event = threading.Event()
+    wizard_active = [False]
+
+    def receive_loop():
+        """!
+        @brief Background thread task to continuously read and print incoming serial messages.
+        """
+        while not stop_event.is_set():
+            if not wizard_active[0]:
+                try:
+                    if esp32.in_waiting > 0:
+                        line = esp32.readline().decode('utf-8', errors='ignore').strip()
+                        if line: print(f"\r[ESP] {line}\nCMD> ", end="", flush=True)
+                except: pass
+            time.sleep(0.01)
+
+    recv_thread = threading.Thread(target=receive_loop, daemon=True)
+    recv_thread.start()
+
+    while True:
+        try:
+            cmd = input("CMD> ").strip()
+            if cmd in ['8', 'exit']: break
+            
+            elif cmd == '1':
+                wizard_active[0] = True
+                run_pendulum_sysid(esp32)
+                wizard_active[0] = False
+                
+            elif cmd == '2':
+                wizard_active[0] = True
+                run_motor_sysid(esp32)
+                wizard_active[0] = False
+                
+            elif cmd == '3':
+                calculate_lqr_and_sync(esp32)
+                
+            elif cmd == '4':
+                esp32.write(b'CALIBRATE_ZERO\n')
+                
+            elif cmd == '5':
+                esp32.write(b'GET_PITCH\n')
+                
+            elif cmd == '6':
+                esp32.write(b'BALANCE\n')
+                
+            elif cmd == '7':
+                esp32.write(b'STOP\n')
+                
+            elif cmd != '':
+                esp32.write((cmd + '\n').encode())
+                
+        except KeyboardInterrupt:
+            break
+
+    stop_event.set()
+    recv_thread.join(timeout=1.0)
+    esp32.close()
+
+if __name__ == "__main__":
+    run_serial_terminal()
+
+==================================================
+FILE: .\src\main.cpp
+==================================================
+/**
+ * @file main.cpp
+ * @brief Main entry point and orchestrator for the balancing cube system.
+ */
+#include <Arduino.h>
+
+// --- ESP Subsystems ---
+#include "ESP/pins.h"
+#include "ESP/wifi_ap.h"
+#include "ESP/web_server.h"
+#include "ESP/controller.h"
+#include "ESP/commands.h"
+#include "ESP/comms.h"
+#include "ESP/get_params.h"
+
+// --- Components ---
+#include "components/servo.h"
+#include "components/imu_sensor.h"
+
+/**
+ * @brief Initializes hardware peripherals, communication interfaces, and control subsystems.
+ */
+void setup() {
+  Serial.begin(115200);
+  Serial.setTimeout(10);
+  delay(1000); // Allow hardware to stabilize before initialization
+
+  init_pins();
+
+  // Initialize hardware components
+  servo_init();
+  init_IMU(); 
+  
+  // Initialize communication and control subsystems
+  init_wifi_AP();
+  commands_init();
+  get_params_init();
+  init_controller();
+}
+
+/**
+ * @brief Main execution loop handling non-blocking updates for telemetry, commands, and actuators.
+ */
+void loop() {
+  unsigned long currentMillis = millis();
+
+  commands_update(currentMillis);
+  get_params_update(currentMillis); 
+  servo_update(currentMillis);
+}
+
+==================================================
+FILE: .\src\components\ESP_driver.cpp
+==================================================
+#include <Arduino.h>
+
+// Pin definitions
+const int buttonPin = 1;
+const int rxPin = 2;
+const int txPin = 3;
+
+// State machine variables
+int motorState = 0; // 0: Stopped, 1: 300 RPM CW, 2: 300 RPM CCW
+
+// Debounce variables
+int buttonState = HIGH;
+int lastButtonState = HIGH;
+unsigned long lastDebounceTime = 0;
+const unsigned long debounceDelay = 50;
+
+void setup() {
+  Serial.begin(115200);
+  Serial2.begin(115200, SERIAL_8N1, rxPin, txPin);
+  pinMode(buttonPin, INPUT_PULLUP);
+  Serial.println("ESP32 Ready. Press button to start.");
+}
+
+void loop() {
+  int reading = digitalRead(buttonPin);
+
+  // Check for button state change
+  if (reading != lastButtonState) {
+    lastDebounceTime = millis();
+  }
+
+  // If the state has been stable longer than the debounce delay
+  if ((millis() - lastDebounceTime) > debounceDelay) {
+    if (reading != buttonState) {
+      buttonState = reading;
+
+      // Execute on button press (active LOW because of INPUT_PULLUP)
+      if (buttonState == LOW) {
+        motorState++;
+        if (motorState > 2) {
+          motorState = 0; // Reset to stopped state
+        }
+
+        // Send the corresponding SimpleFOC command via Serial2
+        // 'T' is the default commander letter for Target velocity
+        switch (motorState) {
+          case 0:
+            Serial.println("Command: Stop");
+            Serial2.println("T0");
+            break;
+          case 1:
+            Serial.println("Command: 300 RPM CW");
+            Serial2.println("T31.42"); // 300 RPM in rad/s
+            break;
+          case 2:
+            Serial.println("Command: 300 RPM CCW");
+            Serial2.println("T-31.42"); // Reverse direction
+            break;
+        }
+      }
+    }
+  }
+  lastButtonState = reading;
+}
+
+==================================================
+FILE: .\src\components\imu_sensor.cpp
+==================================================
+#include "components/imu_sensor.h"
+#include <Arduino.h>
+
+Adafruit_BNO08x imu;
+sh2_SensorValue_t sensor_value;
+
+static imu_data_t current_data = {0.0f, 0.0f};
+static bool imu_is_ready = false;
+
+/**
+ * @brief Initializes the BNO08x IMU and enables required hardware reports.
+ * @return true if successfully initialized, false otherwise.
+ */
+bool init_IMU() {
+    Serial.println("Initializing IMU...");
+    if (!imu.begin_I2C()) {
+        Serial.println("Failed to initialize IMU!");
+        return false;
+    }
+    
+    // Enable Rotation Vector & Gyroscope at 50Hz (20000 microseconds)
+    if (!imu.enableReport(SH2_ROTATION_VECTOR, 20000) || 
+        !imu.enableReport(SH2_GYROSCOPE_CALIBRATED, 20000)) {
+        Serial.println("Failed to enable IMU reports!");
+        return false;
+    }
+    
+    Serial.println("IMU initialized successfully.");
+    imu_is_ready = true;
+    return true;
+}
+
+/**
+ * @brief Fetches and processes the latest IMU events from the hardware queue.
+ * @return current imu_data_t struct containing pitch and pitch_rate.
+ */
+imu_data_t get_imu_data() {
+    if (!imu_is_ready) {
+        return current_data; 
+    }
+
+    // Flush all available events in the sensor queue
+    while (imu.getSensorEvent(&sensor_value)) {
+        if (sensor_value.sensorId == SH2_ROTATION_VECTOR) {
+            float qw = sensor_value.un.rotationVector.real;
+            float qx = sensor_value.un.rotationVector.i;
+            float qy = sensor_value.un.rotationVector.j;
+            float qz = sensor_value.un.rotationVector.k;
+
+            current_data.pitch = atan2(2.0f * (qw * qy - qz * qx), 1.0f - 2.0f * (qy * qy + qx * qx));
+        }
+        else if (sensor_value.sensorId == SH2_GYROSCOPE_CALIBRATED) {
+            current_data.pitch_rate = sensor_value.un.gyroscope.y;
+        }
+    }
+    return current_data;
+}
+
+==================================================
+FILE: .\src\components\motor_driver.cpp
+==================================================
+#include <SimpleFOC.h>
+
+// GM4108H motors typically have 11 pole pairs. 
+// If it stutters or spins at the wrong speed, check the manufacturer spec.
+BLDCMotor motor = BLDCMotor(11);
+
+// B-G431B-ESC1 specific 6-PWM driver setup
+BLDCDriver6PWM driver = BLDCDriver6PWM(A_PHASE_UH, A_PHASE_UL, A_PHASE_VH, A_PHASE_VL, A_PHASE_WH, A_PHASE_WL);
+
+// Instantiate the commander to listen to the Serial port
+Commander command = Commander(Serial);
+void doTarget(char* cmd) { command.motor(&motor, cmd); }
+
+void setup() {
+  Serial.begin(115200);
+  // Driver configuration
+  driver.voltage_power_supply = 12; // Set to your power supply voltage (e.g., 12V or 24V)
+  driver.init();
+  motor.linkDriver(&driver);
+
+  // Limiting voltage to prevent the gimbal motor from overheating
+  motor.voltage_limit = 3; 
+
+  // Configure Open Loop Velocity control
+  motor.controller = MotionControlType::velocity_openloop;
+
+  // Initialize motor
+  motor.init();
+
+  // Add the 'T' command to the commander, linking it to the motor target
+  command.add('T', doTarget, "target velocity");
+
+  Serial.println("Motor ready!");
+}
+
+void loop() {
+  // Run the open-loop motor movement
+  motor.move();
+  
+  // Listen for commands from the ESP32
+  command.run();
+}
+
+==================================================
+FILE: .\src\components\servo.cpp
+==================================================
+/**
+ * @file servo.cpp
+ * @brief Implementation of servo motor control for the jump mechanism.
+ */
+#include "components/servo.h"
+#include <ESP32Servo.h>
+#include "ESP/pins.h"
+#include <Arduino.h>
+
+static Servo myServo;
+static const int ANGLE_REST = 0;
+static const int ANGLE_JUMP = 180;
+
+static bool isJumped = false;
+static unsigned long jumpTime = 0;
+static const unsigned long JUMP_RESET_DELAY_MS = 3000;
+
+/**
+ * @brief Initializes the servo motor and attaches it to the configured pin.
+ */
+void servo_init() {
+  ESP32PWM::allocateTimer(0);
+  ESP32PWM::allocateTimer(1);
+  ESP32PWM::allocateTimer(2);
+  ESP32PWM::allocateTimer(3);
+  myServo.setPeriodHertz(50);
+  myServo.attach(servoPin, 500, 2500);
+  myServo.write(ANGLE_REST);
+}
+
+/**
+ * @brief Non-blocking update function to reset the servo after a jump.
+ * @param currentMillis Current system time in milliseconds.
+ */
+void servo_update(unsigned long currentMillis) {
+  if (isJumped && (currentMillis - jumpTime >= JUMP_RESET_DELAY_MS)) {
+    myServo.write(ANGLE_REST);
+    isJumped = false;
+    Serial.println("Reset: Servo returned to REST position (0).");
+  }
+}
+
+/**
+ * @brief Triggers the servo jump action if not already jumped.
+ */
+void servo_jump() {
+  if (!isJumped) {
+    myServo.write(ANGLE_JUMP);
+    isJumped = true;
+    jumpTime = millis();
+    Serial.println("SNAP! Jump triggered (180). Waiting 3 seconds...");
+  }
+}
+
+/**
+ * @brief Checks if the servo is currently in the jumped state.
+ * @return True if jumped, false otherwise.
+ */
+bool servo_is_jumped() {
+  return isJumped;
+}
+
+==================================================
+FILE: .\src\ESP\commands.cpp
+==================================================
+#include "ESP/commands.h"
+#include "ESP/comms.h"
+#include "ESP/get_params.h"
+#include "ESP/controller.h"
+#include "ESP/LQR.h"
+#include "ESP/storage.h"
+#include "ESP/pins.h"
+#include "components/servo.h"
+#include "components/motor_driver.h"
+#include <Arduino.h>
+
+static int last_button_state = LOW;
+static unsigned long last_debounce_time = 0;
+static const unsigned long DEBOUNCE_DELAY_MS = 50;
+
+String process_command(String command) {
+    command.trim();
+
+    if (command.startsWith("SET_GAINS:")) {
+        String gains_str = command.substring(10);
+        int first_comma = gains_str.indexOf(',');
+        int second_comma = gains_str.indexOf(',', first_comma + 1);
+        
+        if (first_comma != -1 && second_comma != -1) {
+            float k1 = gains_str.substring(0, first_comma).toFloat();
+            float k2 = gains_str.substring(first_comma + 1, second_comma).toFloat();
+            float k3 = gains_str.substring(second_comma + 1).toFloat();
+            
+            lqr_set_gains(k1, k2, k3);
+            storage_save_gains(k1, k2, k3);
+            return "GAINS_SYNC_OK";
+        }
+        return "ERROR: INVALID_GAIN_FORMAT";
+    }
+    else if (command.startsWith("10 ")) {
+        float speed_percent = command.substring(3).toFloat();
+        command_motor_pwm_speed(speed_percent);
+        char buf[32];
+        snprintf(buf, sizeof(buf), "SPEED_SET: %.1f%%", speed_percent);
+        return String(buf);
+    }
+    else if (command == "BALANCE") {
+        set_state(EDGE_BALANCE);
+        return "BALANCE_MODE_ACTIVATED";
+    }
+    else if (command == "STOP") {
+        set_state(IDLE);
+        return "MOTORS_STOPPED";
+    }
+    else if (command == "CALIBRATE_ZERO") {
+        set_state(CALIBRATING);
+        return "STARTING_CALIBRATION";
+    }
+    else if (command == "GET_PITCH") {
+        float pitch_deg = get_shared_pitch_rad() * 180.0f / PI;
+        char buf[32];
+        snprintf(buf, sizeof(buf), "CURRENT_PITCH: %.2f", pitch_deg);
+        return String(buf);
+    }
+
+    return "UNKNOWN_CMD: " + command;
+}
+
+void commands_init() {
+    pinMode(BUTTON, INPUT);
+    last_button_state = digitalRead(BUTTON);
+}
+
+void commands_update(unsigned long currentMillis) {
+    int current_button_state = digitalRead(BUTTON);
+
+    if (current_button_state != last_button_state) {
+        last_debounce_time = currentMillis;
+    }
+
+    if ((currentMillis - last_debounce_time) > DEBOUNCE_DELAY_MS) {
+        static int button_validated_state = LOW;
+
+        if (current_button_state != button_validated_state) {
+            button_validated_state = current_button_state;
+
+            if (button_validated_state == HIGH) {
+                send_comm_message("BUTTON_PRESSED");
+                servo_jump(); 
+            }
+        }
+    }
+    last_button_state = current_button_state;
+
+    check_bluetooth_commands();
+
+    if (Serial.available()) {
+        String incoming_cmd = Serial.readStringUntil('\n');
+        incoming_cmd.trim();
+        if (incoming_cmd.length() > 0) {
+            if (incoming_cmd == "START_PENDULUM") {
+                set_state(SYS_ID_TEST);
+                get_params_start(10000);
+            } 
+            else if (incoming_cmd == "START_MOTOR_TEST") {
+                set_state(SYS_ID_TEST);
+                get_params_start(5000);
+            }
+            else {
+                String reply = process_command(incoming_cmd);
+                send_comm_message(reply.c_str());
+            }
+        }
+    }
+}
+
+==================================================
+FILE: .\src\ESP\comms.cpp
+==================================================
+#include "ESP/comms.h"
+#include "ESP/wifi_ap.h"
+#include <Arduino.h>
+
+void comms_init() {
+  // Initialization logic for comms (if any)
+}
+
+/**
+ * @brief Routes messages over WiFi if a client is connected, otherwise falls back to Serial.
+ */
+void send_comm_message(const char* msg) {
+  if (wifi_has_client()) {
+    send_wifi_message(msg);
+  } else {
+    Serial.println(msg);
+  }
+}
+
+==================================================
+FILE: .\src\ESP\controller.cpp
+==================================================
+#include "ESP/controller.h"
+#include "components/imu_sensor.h"
+#include "components/motor_driver.h"
+#include "ESP/LQR.h"
+#include "ESP/comms.h"
+#include "ESP/storage.h"
+#include <Arduino.h>
+
+cube_state current_state = IDLE;
+TaskHandle_t ControlTaskHandle = NULL;
+
+static float shared_pitch_rad = 0.0f;
+static float pitch_offset_rad = 0.0f;
+static portMUX_TYPE telemetryMux = portMUX_INITIALIZER_UNLOCKED;
+
+static const float FALL_THRESHOLD_RAD = 15.0f * (PI / 180.0f); 
+
+float get_shared_pitch_rad() {
+    float val;
+    taskENTER_CRITICAL(&telemetryMux);
+    val = shared_pitch_rad;
+    taskEXIT_CRITICAL(&telemetryMux);
+    return val;
+}
+
+void set_state(cube_state new_state) {
+    if (current_state == new_state) return;
+    current_state = new_state;
+    
+    switch (current_state) {
+        case IDLE:           send_comm_message("STATE: IDLE"); break;
+        case EDGE_BALANCE:   send_comm_message("STATE: EDGE_BALANCE"); break;
+        case FALL_TO_IDLE:   send_comm_message("STATE: FALL_TO_IDLE"); break;
+        case SYS_ID_TEST:    send_comm_message("STATE: SYS_ID_TEST"); break;
+        case CALIBRATING:    send_comm_message("STATE: CALIBRATING ZERO..."); break;
+        default: break;
+    }
+    
+    if (current_state == FALL_TO_IDLE || current_state == SYS_ID_TEST) {
+        command_motor_torque(0.0f);
+    }
+}
+
+void control_loop_task(void *pvParameters) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(20); 
+
+    for (;;) {
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+
+        imu_data_t imu_raw = get_imu_data();
+        
+        // Subtract static offset for all control logic
+        float theta_b = imu_raw.pitch - pitch_offset_rad; 
+        float theta_b_dot = imu_raw.pitch_rate;
+
+        taskENTER_CRITICAL(&telemetryMux);
+        shared_pitch_rad = theta_b;
+        taskEXIT_CRITICAL(&telemetryMux);
+
+        if (current_state == EDGE_BALANCE && fabs(theta_b) > FALL_THRESHOLD_RAD) {
+            set_state(FALL_TO_IDLE);
+        }
+
+        switch (current_state) {
+            case IDLE:
+            case FALL_TO_IDLE:
+            case SYS_ID_TEST:
+                command_motor_torque(0.0f);
+                break;
+                
+            case CALIBRATING: {
+                static int calib_samples = 0;
+                static float calib_sum = 0.0f;
+                
+                if (calib_samples == 0) calib_sum = 0.0f;
+                
+                calib_sum += imu_raw.pitch; // Accumulate raw data
+                calib_samples++;
+                
+                if (calib_samples >= 100) { // 100 samples @ 50Hz = 2 seconds
+                    pitch_offset_rad = calib_sum / 100.0f;
+                    storage_save_pitch_offset(pitch_offset_rad);
+                    calib_samples = 0;
+                    send_comm_message("CALIBRATION_DONE");
+                    set_state(IDLE);
+                }
+                break;
+            }
+
+            case EDGE_BALANCE: {
+                float theta_w_dot = get_motor_velocity(); 
+                float torque_req = calculate_lqr_torque(theta_b, theta_b_dot, theta_w_dot);
+                command_motor_torque(torque_req);
+                break;
+            }
+            default:
+                break;
+        }
+    }
+}
+
+void init_controller() {
+    storage_init();
+    pitch_offset_rad = storage_load_pitch_offset();
+    lqr_init();
+         
+    xTaskCreatePinnedToCore(
+        control_loop_task, "ControlLoopTask", 4096, NULL, 3, &ControlTaskHandle, 1 
+    );
+}
+
+==================================================
+FILE: .\src\ESP\get_params.cpp
+==================================================
+#include "ESP/get_params.h"
+#include "ESP/controller.h" // Changed: We now pull telemetry from the controller safely
+#include "ESP/comms.h"
+#include <Arduino.h>
+#include <cmath> // Added for fabs()
+
+static bool active = false;
+static unsigned long endTime = 0;
+static unsigned long lastSampleTime = 0;
+static const unsigned long PENDULUM_SAMPLE_RATE_MS = 10;
+
+void get_params_init() {
+    active = false;
+    endTime = 0;
+    lastSampleTime = 0;
+}
+
+void get_params_start(unsigned long duration_ms) {
+    active = true;
+    endTime = millis() + duration_ms;
+    lastSampleTime = 0;
+    send_comm_message("ACK_START_PENDULUM");
+}
+
+bool get_params_is_active() {
+    return active;
+}
+
+/**
+ * @brief Non-blocking update loop for telemetry parameter fetching.
+ */
+void get_params_update(unsigned long currentMillis) {
+    if (!active) return;
+
+    if (currentMillis < endTime) {
+        if (currentMillis - lastSampleTime >= PENDULUM_SAMPLE_RATE_MS) {
+            lastSampleTime = currentMillis;
+            
+            // Changed: Fetching safely from the RTOS controller task, NOT hardware directly
+            float pitch_deg = get_shared_pitch_rad() * 180.0f / PI;
+            
+            static float last_pitch_deg = -999.0f; 
+            
+            // Fixed: Using fabs() instead of abs() for floating point arithmetic
+            if (fabs(pitch_deg - last_pitch_deg) > 0.05f) { 
+                char buf[64];
+                snprintf(buf, sizeof(buf), "TEST_DATA:%lu,%.2f", currentMillis, pitch_deg);
+                send_comm_message(buf);
+                last_pitch_deg = pitch_deg; 
+            }
+        }
+    } else {
+        active = false;
+        send_comm_message("TEST_DONE");
+    }
+}
+
+==================================================
+FILE: .\src\ESP\LQR.cpp
+==================================================
+#include "ESP/LQR.h"
+#include "ESP/storage.h"
+
+static float K[3] = { 0.0f, 0.0f, 0.0f };
+static float x_f = 0.0f;
+static const float alpha = 0.02f; 
+
+void lqr_init() {
+    x_f = 0.0f;
+    storage_load_gains(&K[0], &K[1], &K[2]);
+}
+
+void lqr_set_gains(float k1, float k2, float k3) {
+    K[0] = k1;
+    K[1] = k2;
+    K[2] = k3;
+}
+
+float calculate_lqr_torque(float theta_b, float theta_b_dot, float theta_w_dot) {
+    x_f = (1.0f - alpha) * x_f + alpha * theta_b;
+
+    float theta_b_corrected = theta_b - x_f;
+    float x[3] = { theta_b_corrected, theta_b_dot, theta_w_dot };
+
+    float u = 0.0f;
+    for (int i = 0; i < 3; ++i) {
+        u -= K[i] * x[i];
+    }
+
+    return u;
+}
+
+==================================================
+FILE: .\src\ESP\pins.cpp
+==================================================
+#include <Arduino.h>
+#include "ESP/pins.h"
+
+void init_pins() {
+  pinMode(LED_Y, OUTPUT);
+  digitalWrite(LED_Y, LOW);
+
+  pinMode(LED_O, OUTPUT);
+  digitalWrite(LED_O, LOW);
+
+  pinMode(BUTTON, INPUT_PULLUP);
+}
+
+
+==================================================
+FILE: .\src\ESP\storage.cpp
+==================================================
+#include "ESP/storage.h"
+#include <Preferences.h>
+
+static Preferences prefs;
+
+void storage_init() {
+    prefs.begin("cube_cfg", false);
+}
+
+void storage_save_gains(float k1, float k2, float k3) {
+    prefs.putFloat("k1", k1);
+    prefs.putFloat("k2", k2);
+    prefs.putFloat("k3", k3);
+}
+
+void storage_load_gains(float* k1, float* k2, float* k3) {
+    *k1 = prefs.getFloat("k1", 0.0f);
+    *k2 = prefs.getFloat("k2", 0.0f);
+    *k3 = prefs.getFloat("k3", 0.0f);
+}
+
+void storage_save_pitch_offset(float offset) {
+    prefs.putFloat("p_off", offset);
+}
+
+float storage_load_pitch_offset() {
+    return prefs.getFloat("p_off", 0.0f);
+}
+
+==================================================
+FILE: .\src\ESP\web_server.cpp
+==================================================
+#include "ESP/web_server.h"
+#include <Arduino.h>
+
+AsyncWebServer server(80);
+
+const char index_html[] = R"rawliteral(
+<!DOCTYPE HTML>
+<html>
+<head>
+  <title>Balancing Cube Control</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+  <h1>Cube Dashboard</h1>
+  <p>Proportional (P): <input type="range" min="0" max="100" value="50"></p>
+  <button>Emergency Stop</button>
+</body>
+</html>
+)rawliteral";
+
+void init_web_server() {
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/html", index_html);
+  });
+  server.begin();
+  Serial.println("Web server initialized.");
+}
+
+
+==================================================
+FILE: .\src\ESP\wifi_ap.cpp
+==================================================
+#include <WiFi.h>
+#include <WiFiUdp.h>
+#include <cstring>
+#include "ESP/wifi_ap.h"
+#include "ESP/commands.h"
+#include "ESP/pins.h"
+#include "ESP/network_config.h"
+
+const char* ssid = "um... banana?";
+const char* password = "yes banana";
+
+WiFiUDP udp;
+
+static IPAddress lastClientIP;
+static uint16_t lastClientPort = 0;
+
+void init_wifi_AP() {
+    Serial.println("Initializing WiFi Access Point...");
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(ssid, password);
+    
+    IPAddress IP = WiFi.softAPIP();
+    Serial.print("AP IP address: ");
+    Serial.println(IP);
+    Serial.println("Wi-Fi AP Started successfully!");
+    
+    // start UDP server after AP is up
+    udp.begin(UDP_PORT);
+    Serial.printf("Listening for UDP packets on port %d\n", UDP_PORT);
+}
+
+bool wifi_has_client() {
+    return WiFi.softAPgetStationNum() > 0 && lastClientPort != 0;
+}
+
+bool send_wifi_message(const char* msg) {
+    if (!wifi_has_client()) return false;
+    udp.beginPacket(lastClientIP, lastClientPort);
+    udp.print(msg);
+    return udp.endPacket() == 1;
+}
+
+void check_wifi_commands() {
+    int packetSize = udp.parsePacket();
+    if (packetSize) {
+        lastClientIP = udp.remoteIP();
+        lastClientPort = udp.remotePort();
+
+        char incomingPacket[255];
+        int len = udp.read(incomingPacket, 255);
+        if (len > 0) incomingPacket[len] = '\0';
+        else incomingPacket[0] = '\0';
+
+        // simple token compare without heap allocation
+        // trim trailing newlines/spaces
+        int end = strlen(incomingPacket) - 1;
+        while (end >= 0 && (incomingPacket[end] == '\n' || incomingPacket[end] == '\r' || incomingPacket[end] == ' ')) {
+            incomingPacket[end] = '\0';
+            end--;
+        }
+
+        // process command through central processor and reply
+        String reply = process_command(String(incomingPacket));
+
+        udp.beginPacket(lastClientIP, lastClientPort);
+        udp.print(reply);
+        udp.endPacket();
+    }
+}
