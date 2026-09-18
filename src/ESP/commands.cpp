@@ -40,15 +40,25 @@ String process_command(String command) {
         return String(buf);
     }
     else if (command == "BALANCE") {
-        set_state(EDGE_BALANCE);
+        set_state(State::Balance);
         return "BALANCE_MODE_ACTIVATED";
     }
     else if (command == "STOP") {
-        set_state(IDLE);
-        return "MOTORS_STOPPED";
+        set_state(State::Spindown);
+        return "SPINNING_DOWN";
+    }
+    else if (command == "CLEAR_FAULT") {
+        clear_fault();
+        return "FAULT_CLEARED";
+    }
+    else if (command == "STATUS") {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "STATE: %s  FAULT: %s",
+                 state_name(current_state), fault_name(current_fault()));
+        return String(buf);
     }
     else if (command == "CALIBRATE_ZERO") {
-        set_state(CALIBRATING);
+        set_state(State::Calibrate);
         return "STARTING_CALIBRATION";
     }
     else if (command == "GET_PITCH") {
@@ -94,11 +104,11 @@ void commands_update(unsigned long currentMillis) {
         incoming_cmd.trim();
         if (incoming_cmd.length() > 0) {
             if (incoming_cmd == "START_PENDULUM") {
-                set_state(SYS_ID_TEST);
+                set_state(State::SysId);
                 get_params_start(10000);
             } 
             else if (incoming_cmd == "START_MOTOR_TEST") {
-                set_state(SYS_ID_TEST);
+                set_state(State::SysId);
                 get_params_start(5000);
             }
             else {

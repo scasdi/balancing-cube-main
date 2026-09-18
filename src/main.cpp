@@ -15,7 +15,6 @@
 
 // --- Components ---
 #include "components/servo.h"
-#include "components/imu_sensor.h"
 
 /**
  * @brief Initializes hardware peripherals, communication interfaces, and control subsystems.
@@ -29,7 +28,6 @@ void setup() {
 
   // Initialize hardware components
   servo_init();
-  init_IMU(); 
   
   // Initialize communication and control subsystems
   init_wifi_AP();

@@ -29,11 +29,11 @@ void check_bluetooth_commands() {
         incoming_cmd.trim();
         if (incoming_cmd.length() > 0) {
             if (incoming_cmd == "START_PENDULUM") {
-                set_state(SYS_ID_TEST);
+                set_state(State::SysId);
                 get_params_start(10000);
             } 
             else if (incoming_cmd == "START_MOTOR_TEST") {
-                set_state(SYS_ID_TEST);
+                set_state(State::SysId);
                 get_params_start(5000);
             }
             else {
