@@ -1,11 +1,14 @@
 #pragma once
 #include <stdint.h>
 
+// Tunable numbers and the data that flows through one control cycle.
+// Kept apart from state_machine.h so that "what are the trip points?" and
+// "what does the loop see?" can be answered without reading any logic.
+//
 // Units are SI throughout this project: radians, radians per second, newton
-// metres, volts, microseconds. No degrees anywhere below the telemetry layer.
+// metres, volts, microseconds. Degrees appear only in telemetry output.
 
-// Everything the state machine and the control law need to see, sampled once
-// per control cycle. Filled by the sensor layer, read by everything else.
+// Everything the state machine and the control law see, sampled once per cycle.
 struct ControlInput {
     float    tilt_rad;         // Body angle. Zero = upright, offset removed.
     float    tilt_rate_rads;   // Body angular rate, from the gyro.
@@ -16,19 +19,17 @@ struct ControlInput {
     bool     driver_valid;     // False when the driver has stopped reporting.
 };
 
-// What the control task hands to the actuator layer this cycle.
+// What the control cycle hands to the actuator layer.
 struct ControlOutput {
     float torque_nm;   // Commanded wheel torque.
     bool  saturated;   // True when the request was clipped by max_torque_nm.
 };
 
-// Every threshold the state machine and safety checks compare against, in one
-// place, so the limits can be reviewed without reading any logic.
+// Every threshold compared against by the state machine and the safety checks.
+// One struct so the whole trip envelope is reviewable in one place.
 //
 // Sign convention for tilt_rad and torque_nm is fixed on the bench during
-// bring-up and recorded here once measured. Until then the machine treats
-// tilt symmetrically, so an inverted sign shows up as a failure to balance
-// rather than as a runaway.
+// bring-up and recorded here once measured.
 struct Limits {
     float    fall_tilt_rad;        // Beyond this, balancing is abandoned.
     float    max_tilt_rad;         // Beyond this, the reading is not believable.

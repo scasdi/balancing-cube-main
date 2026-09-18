@@ -1,5 +1,5 @@
 #include "ESP/get_params.h"
-#include "ESP/controller.h" // Changed: We now pull telemetry from the controller safely
+#include "ESP/state_machine.h" // Changed: We now pull telemetry from the controller safely
 #include "ESP/comms.h"
 #include <Arduino.h>
 #include <cmath> // Added for fabs()

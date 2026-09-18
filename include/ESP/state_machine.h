@@ -1,5 +1,5 @@
-#ifndef ESP_CONTROLLER_H
-#define ESP_CONTROLLER_H
+#ifndef ESP_STATE_MACHINE_H
+#define ESP_STATE_MACHINE_H
 
 #include <Arduino.h>
 
@@ -20,4 +20,4 @@ float get_shared_pitch_rad();
 void set_state(cube_state new_state);
 void init_controller();
 
-#endif // ESP_CONTROLLER_H
+#endif // ESP_STATE_MACHINE_H

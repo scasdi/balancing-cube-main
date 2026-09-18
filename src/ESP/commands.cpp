@@ -1,7 +1,7 @@
 #include "ESP/commands.h"
 #include "ESP/comms.h"
 #include "ESP/get_params.h"
-#include "ESP/controller.h"
+#include "ESP/state_machine.h"
 #include "ESP/LQR.h"
 #include "ESP/storage.h"
 #include "ESP/pins.h"
