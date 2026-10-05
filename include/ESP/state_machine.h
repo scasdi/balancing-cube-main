@@ -41,7 +41,8 @@ const char* fault_name(FaultCode f);
 State     get_state();
 FaultCode get_fault();            // FaultCode::None whenever state is not Fault
 float     get_shared_pitch_rad(); // Offset-corrected body angle, newest cycle
-uint32_t  get_worst_cycle_us();   // Longest control cycle seen since boot
+uint32_t  get_worst_cycle_us();   // Longest control cycle since the last reset
+State     get_worst_cycle_state();// Which state that longest cycle ran in
 
 // --- Changing. Safe from any task; never blocks. ---
 // The control task owns the state and is its only writer. These post a request
@@ -51,6 +52,10 @@ uint32_t  get_worst_cycle_us();   // Longest control cycle seen since boot
 void request_state(State s);
 void request_fault(FaultCode reason);
 void request_clear_fault();       // Only exit from Fault. Returns to Idle.
+
+// Restart the cycle-time measurement, so a window can be timed without a
+// reboot. Goes through the same queue to keep the control task the only writer.
+void request_reset_worst();
 
 // --- Lifecycle ---
 void state_machine_init();        // Once, from setup(), on core 0

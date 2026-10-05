@@ -9,16 +9,25 @@
 // ---------------------------------------------------------------------------
 // Task boundary
 // ---------------------------------------------------------------------------
-// The control task runs on core 1 at a fixed period and must have a worst-case
-// execution time we can compute. That rules out any call whose duration is
-// decided elsewhere: comms (the WiFi and Bluetooth stacks live on core 0 and
-// hold their own locks), NVS writes (a flash erase stalls instruction fetch),
-// and heap allocation.
+// The control task runs at priority 3 pinned to core 1 and must have a
+// worst-case execution time we can compute. That rules out any call whose
+// duration is decided elsewhere: comms (the WiFi and Bluetooth stacks run on
+// core 0 and hold their own locks), NVS writes, and heap allocation.
 //
 // So the task does only sensing, the control law, and the actuator write. When
-// it needs the outside world it posts to a queue and moves on; loop() drains
-// that queue on core 0 in state_machine_service(). Both queue operations use a
-// zero timeout, which makes them bounded by construction.
+// it needs the outside world it posts to a queue and moves on;
+// state_machine_service() drains that queue from loop(). Both queue operations
+// use a zero timeout, which makes them bounded by construction.
+//
+// Where the Arduino loop() actually runs: arduino-esp32 pins loopTask to
+// core 1 at priority 1 - the same core as this task, not core 0. That is still
+// correct here, because priority 3 preempts priority 1: the control task takes
+// the core whenever it wakes, and the deferred work is what gets interrupted.
+// One consequence survives it, though. Code executes in place from flash, so
+// an NVS write disables the instruction cache for every core while it runs.
+// Deferring the write stops it blocking inside the loop, but cannot stop it
+// stalling the loop. That is why the only write sits at the end of Calibrate,
+// a state which commands no torque.
 // ---------------------------------------------------------------------------
 
 static const uint32_t CONTROL_PERIOD_MS = 20;
@@ -32,12 +41,12 @@ static const int CALIB_SAMPLE_COUNT = 100;
 // cannot outrun a 50 Hz consumer, so this only has to absorb a burst.
 static const int REQUEST_QUEUE_DEPTH = 4;
 
-// Events outbound to core 0. Depth 16 covers a fault arriving while a few
+// Events outbound to loop(). Depth 16 covers a fault arriving while a few
 // state changes are still unsent.
 static const int EVENT_QUEUE_DEPTH = 16;
 
-// What core 0 may ask the control task to do.
-enum class ReqKind : uint8_t { EnterState, LatchFault, ClearFault };
+// What other tasks may ask the control task to do.
+enum class ReqKind : uint8_t { EnterState, LatchFault, ClearFault, ResetWorst };
 
 struct ControlRequest {
     ReqKind   kind;
@@ -45,7 +54,7 @@ struct ControlRequest {
     FaultCode fault;   // Valid when kind == LatchFault
 };
 
-// What the control task asks core 0 to do on its behalf.
+// What the control task asks loop() to do on its behalf.
 enum class EventKind : uint8_t {
     StateEntered, FaultLatched, CalibrationDone, SavePitchOffset, DeadlineOverrun
 };
@@ -70,6 +79,7 @@ static volatile State     current_state    = State::Init;
 static volatile FaultCode fault_reason     = FaultCode::None;
 static volatile float     shared_pitch_rad = 0.0f;
 static volatile uint32_t  worst_cycle_us   = 0;
+static volatile State     worst_cycle_state = State::Init;
 
 // Control-task private. No other task touches these.
 static float pitch_offset_rad = 0.0f;
@@ -118,6 +128,7 @@ State     get_state()           { return current_state; }
 FaultCode get_fault()           { return fault_reason; }
 float     get_shared_pitch_rad(){ return shared_pitch_rad; }
 uint32_t  get_worst_cycle_us()  { return worst_cycle_us; }
+State     get_worst_cycle_state(){ return worst_cycle_state; }
 
 // ---------------------------------------------------------------------------
 // Requests from other tasks
@@ -142,6 +153,11 @@ void request_fault(FaultCode reason) {
 
 void request_clear_fault() {
     ControlRequest req = { ReqKind::ClearFault, State::Idle, FaultCode::None };
+    post_request(req);
+}
+
+void request_reset_worst() {
+    ControlRequest req = { ReqKind::ResetWorst, State::Init, FaultCode::None };
     post_request(req);
 }
 
@@ -193,8 +209,7 @@ static void enter_state(State next) {
 static void do_latch_fault(FaultCode reason) {
     if (current_state == State::Fault) return;
 
-    // Reason before state, so a reader on core 0 that observes Fault also
-    // observes why.
+    // Reason before state, so a reader that observes Fault also observes why.
     fault_reason  = reason;
     current_state = State::Fault;
     command_motor_torque(0.0f);
@@ -225,6 +240,11 @@ static void apply_requests() {
             case ReqKind::EnterState: enter_state(req.state);      break;
             case ReqKind::LatchFault: do_latch_fault(req.fault);   break;
             case ReqKind::ClearFault: do_clear_fault();            break;
+
+            case ReqKind::ResetWorst:
+                worst_cycle_us    = 0;
+                worst_cycle_state = current_state;
+                break;
         }
     }
 }
@@ -237,7 +257,13 @@ static void check_cycle_time(uint32_t cycle_start_us) {
     const uint32_t elapsed_us = micros() - cycle_start_us;
     const bool     new_worst  = elapsed_us > worst_cycle_us;
 
-    if (new_worst) worst_cycle_us = elapsed_us;
+    // Recording the state alongside the time is what makes the number
+    // actionable: a slow cycle in Calibrate and a slow cycle in Balance have
+    // completely different causes and consequences.
+    if (new_worst) {
+        worst_cycle_us    = elapsed_us;
+        worst_cycle_state = current_state;
+    }
     if (elapsed_us <= CONTROL_PERIOD_US) return;
 
     // In Balance a late cycle breaks the control law's timing assumption while
@@ -305,9 +331,11 @@ static void control_loop_task(void *pvParameters) {
                     calib_samples    = 0;
                     calib_sum        = 0.0f;
 
-                    // The flash write is handed to core 0: an NVS put can erase
-                    // a 4 kB sector, which takes longer than a control period
-                    // and stalls instruction fetch on both cores while it runs.
+                    // The flash write is handed to loop(): an NVS put can
+                    // erase a 4 kB sector, which takes longer than a control
+                    // period. It still stalls this loop through the disabled
+                    // instruction cache, which is survivable only because
+                    // Calibrate commands no torque.
                     ControlEvent save = {};
                     save.kind       = EventKind::SavePitchOffset;
                     save.offset_rad = pitch_offset_rad;
@@ -335,7 +363,7 @@ static void control_loop_task(void *pvParameters) {
 }
 
 // ---------------------------------------------------------------------------
-// Lifecycle, both on core 0
+// Lifecycle. Both are called from the Arduino task.
 // ---------------------------------------------------------------------------
 
 void state_machine_init() {
@@ -366,8 +394,8 @@ void state_machine_init() {
     else        request_fault(FaultCode::ImuInitFailed);
 }
 
-// Everything the control task deferred happens here: comms and flash. Called
-// from loop(), so it inherits the Arduino task's priority and its stack.
+// Everything the control task deferred happens here: comms and flash. Runs at
+// the Arduino task's priority (1), so the control task preempts it freely.
 void state_machine_service() {
     if (event_queue == NULL) return;
 

@@ -52,13 +52,19 @@ String process_command(String command) {
         return "FAULT_CLEARED";
     }
     else if (command == "STATUS") {
-        // WORST is the longest control cycle since boot. Anything at or above
-        // the 20000 us period means the loop is not keeping its deadline.
-        char buf[96];
-        snprintf(buf, sizeof(buf), "STATE: %s  FAULT: %s  WORST: %luus",
+        // WORST is the longest control cycle since the last reset, and IN names
+        // the state it ran in. At or above the 20000 us period means the loop
+        // is not keeping its deadline.
+        char buf[112];
+        snprintf(buf, sizeof(buf), "STATE: %s  FAULT: %s  WORST: %luus IN %s",
                  state_name(get_state()), fault_name(get_fault()),
-                 (unsigned long)get_worst_cycle_us());
+                 (unsigned long)get_worst_cycle_us(),
+                 state_name(get_worst_cycle_state()));
         return String(buf);
+    }
+    else if (command == "RESET_WORST") {
+        request_reset_worst();
+        return "WORST_RESET";
     }
     else if (command == "CALIBRATE_ZERO") {
         request_state(State::Calibrate);

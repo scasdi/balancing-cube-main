@@ -49,7 +49,8 @@ void loop() {
   unsigned long currentMillis = millis();
 
   // Work the control task deferred because it cannot bound the duration:
-  // comms and flash writes. Runs here, on core 0, at loop() priority.
+  // comms and flash writes. loop() shares core 1 with the control task but
+  // runs at priority 1 against its 3, so it is always the one preempted.
   state_machine_service();
 
   check_wifi_commands();
