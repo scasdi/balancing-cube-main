@@ -1,6 +1,8 @@
 #include "ESP/comms.h"
 #include "ESP/wifi_ap.h"
 #include "ESP/commands.h"
+#include "ESP/state_machine.h"   // set_state(), State
+#include "ESP/get_params.h"      // get_params_start()
 #include <Arduino.h>
 #include <BluetoothSerial.h>
 
