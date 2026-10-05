@@ -262,17 +262,36 @@ def run_motor_sysid(esp32):
     
     plt.close()
 
+# Bluetooth address of "cool cube" - the ESP32's factory-burned BD_ADDR. Windows
+# embeds it in the hwid of that device's outgoing SPP port, which is the only
+# reliable way to pick it out: every paired SPP port reports the identical
+# description, "Standard Serial over Bluetooth link".
+CUBE_BT_ADDR = "28562F498C5A"
+
+# USB-serial bridge chips used by ESP32 dev boards, for when the cable is in.
+USB_SERIAL_KEYWORDS = ["ch340", "cp210", "ftdi", "silabs"]
+
+
 def find_esp32_port():
     """!
-    @brief Scans available serial ports and identifies the ESP32 (USB or Bluetooth).
+    @brief Locates the cube: its Bluetooth port by address, else a USB bridge.
     @return String representing the COM port, or None if not found.
     """
     ports = serial.tools.list_ports.comports()
+
+    # Bluetooth, matched by address. Incoming ports carry an all-zero address
+    # and never reach the cube, so matching the real one rules those out too.
     for port in ports:
-        desc = port.description.lower()
-        hwid = port.hwid.lower()
-        if any(kw in desc or kw in hwid for kw in ["usb", "uart", "ch340", "cp210", "bluetooth", "bthenum"]):
+        if CUBE_BT_ADDR.lower() in (port.hwid or "").lower():
             return port.device
+
+    # USB cable. Matches the bridge chip, never the word "bluetooth": that was
+    # the bug, it matched all eight SPP ports and returned whichever came first.
+    for port in ports:
+        blob = f"{port.description} {port.hwid}".lower()
+        if any(kw in blob for kw in USB_SERIAL_KEYWORDS):
+            return port.device
+
     return None
 
 def print_help_menu():
