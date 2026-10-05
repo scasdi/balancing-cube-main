@@ -15,6 +15,7 @@
 
 // --- Components ---
 #include "components/servo.h"
+#include "components/motor_driver.h"
 
 /**
  * @brief Initializes hardware peripherals, communication interfaces, and control subsystems.
@@ -28,12 +29,17 @@ void setup() {
 
   // Initialize hardware components
   servo_init();
-  
+  motor_driver_init();   // Begins Serial2. Without it every torque command is a silent no-op.
+
   // Initialize communication and control subsystems
   init_wifi_AP();
+  comms_init();          // Begins BluetoothSerial. Without it the BT link never comes up.
   commands_init();
   get_params_init();
-  init_controller();
+
+  // Last: the control task starts here and expects comms and the motor link
+  // to already exist, because it reports its first state transition through them.
+  state_machine_init();
 }
 
 /**
@@ -42,7 +48,12 @@ void setup() {
 void loop() {
   unsigned long currentMillis = millis();
 
+  // Work the control task deferred because it cannot bound the duration:
+  // comms and flash writes. Runs here, on core 0, at loop() priority.
+  state_machine_service();
+
+  check_wifi_commands();
   commands_update(currentMillis);
-  get_params_update(currentMillis); 
+  get_params_update(currentMillis);
   servo_update(currentMillis);
 }

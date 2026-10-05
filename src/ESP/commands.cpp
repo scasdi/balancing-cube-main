@@ -40,25 +40,28 @@ String process_command(String command) {
         return String(buf);
     }
     else if (command == "BALANCE") {
-        set_state(State::Balance);
+        request_state(State::Balance);
         return "BALANCE_MODE_ACTIVATED";
     }
     else if (command == "STOP") {
-        set_state(State::Spindown);
+        request_state(State::Spindown);
         return "SPINNING_DOWN";
     }
     else if (command == "CLEAR_FAULT") {
-        clear_fault();
+        request_clear_fault();
         return "FAULT_CLEARED";
     }
     else if (command == "STATUS") {
-        char buf[64];
-        snprintf(buf, sizeof(buf), "STATE: %s  FAULT: %s",
-                 state_name(current_state), fault_name(current_fault()));
+        // WORST is the longest control cycle since boot. Anything at or above
+        // the 20000 us period means the loop is not keeping its deadline.
+        char buf[96];
+        snprintf(buf, sizeof(buf), "STATE: %s  FAULT: %s  WORST: %luus",
+                 state_name(get_state()), fault_name(get_fault()),
+                 (unsigned long)get_worst_cycle_us());
         return String(buf);
     }
     else if (command == "CALIBRATE_ZERO") {
-        set_state(State::Calibrate);
+        request_state(State::Calibrate);
         return "STARTING_CALIBRATION";
     }
     else if (command == "GET_PITCH") {
@@ -104,11 +107,11 @@ void commands_update(unsigned long currentMillis) {
         incoming_cmd.trim();
         if (incoming_cmd.length() > 0) {
             if (incoming_cmd == "START_PENDULUM") {
-                set_state(State::SysId);
+                request_state(State::SysId);
                 get_params_start(10000);
             } 
             else if (incoming_cmd == "START_MOTOR_TEST") {
-                set_state(State::SysId);
+                request_state(State::SysId);
                 get_params_start(5000);
             }
             else {

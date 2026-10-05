@@ -7,6 +7,8 @@ sh2_SensorValue_t sensor_value;
 static imu_data_t current_data = {0.0f, 0.0f};
 static bool imu_is_ready = false;
 
+static const int MAX_EVENTS_PER_CALL = 8;
+
 /**
  * @brief Initializes the BNO08x IMU and enables required hardware reports.
  * @return true if successfully initialized, false otherwise.
@@ -39,8 +41,13 @@ imu_data_t get_imu_data() {
         return current_data; 
     }
 
-    // Flush all available events in the sensor queue
-    while (imu.getSensorEvent(&sensor_value)) {
+    // Bounded drain. At 50 Hz the IMU produces two reports per control cycle
+    // (rotation vector and gyro). The cap stops a backlog - after a stall, or
+    // if the sensor is ever configured faster than this loop - from turning one
+    // cycle into an unbounded run of I2C transactions.
+    for (int i = 0; i < MAX_EVENTS_PER_CALL; ++i) {
+        if (!imu.getSensorEvent(&sensor_value)) break;
+
         if (sensor_value.sensorId == SH2_ROTATION_VECTOR) {
             float qw = sensor_value.un.rotationVector.real;
             float qx = sensor_value.un.rotationVector.i;

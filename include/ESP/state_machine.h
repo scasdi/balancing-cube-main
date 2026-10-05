@@ -3,10 +3,11 @@
 
 #include <stdint.h>
 
-// Operating states. The control task owns the current value; nothing else
-// writes it. Scoped enum so these names cannot collide with the Arduino and
-// ESP-IDF macros that occupy the global namespace, and so a State can never
-// be silently compared against an int or against FaultCode below.
+// Operating states. The control task is the only writer of the current state;
+// every other task asks for a change through request_state() below. Scoped enum
+// so these names cannot collide with the Arduino and ESP-IDF macros that occupy
+// the global namespace, and so a State can never be compared against an int or
+// against FaultCode.
 enum class State : uint8_t {
     Init,       // Hardware bring-up. Entered once at boot.
     Idle,       // Safe. Zero torque. Accepts commands.
@@ -33,25 +34,26 @@ enum class FaultCode : uint8_t {
     BusOvervoltage,
 };
 
-extern State current_state;
-
 const char* state_name(State s);
 const char* fault_name(FaultCode f);
 
-// Latest fault reason. FaultCode::None whenever state is not Fault.
-FaultCode current_fault();
+// --- Reading. Safe from any task on either core. ---
+State     get_state();
+FaultCode get_fault();            // FaultCode::None whenever state is not Fault
+float     get_shared_pitch_rad(); // Offset-corrected body angle, newest cycle
+uint32_t  get_worst_cycle_us();   // Longest control cycle seen since boot
 
-// Request a state change. Ignored while latched in Fault; the only way out of
-// Fault is clear_fault().
-void set_state(State new_state);
+// --- Changing. Safe from any task; never blocks. ---
+// The control task owns the state and is its only writer. These post a request
+// and return immediately; the task applies it at the top of its next cycle, so
+// a request takes effect within one control period. They are the only way for
+// core 0 to move the machine.
+void request_state(State s);
+void request_fault(FaultCode reason);
+void request_clear_fault();       // Only exit from Fault. Returns to Idle.
 
-// Enter Fault with a reason and report it. Zero torque, latched.
-void latch_fault(FaultCode reason);
-
-// Leave Fault and return to Idle. Does nothing in any other state.
-void clear_fault();
-
-float get_shared_pitch_rad();
-void  init_controller();
+// --- Lifecycle ---
+void state_machine_init();        // Once, from setup(), on core 0
+void state_machine_service();     // Every loop() iteration, on core 0
 
 #endif // ESP_STATE_MACHINE_H

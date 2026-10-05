@@ -1,7 +1,7 @@
 #include "ESP/comms.h"
 #include "ESP/wifi_ap.h"
 #include "ESP/commands.h"
-#include "ESP/state_machine.h"   // set_state(), State
+#include "ESP/state_machine.h"   // request_state(), State
 #include "ESP/get_params.h"      // get_params_start()
 #include <Arduino.h>
 #include <BluetoothSerial.h>
@@ -31,11 +31,11 @@ void check_bluetooth_commands() {
         incoming_cmd.trim();
         if (incoming_cmd.length() > 0) {
             if (incoming_cmd == "START_PENDULUM") {
-                set_state(State::SysId);
+                request_state(State::SysId);
                 get_params_start(10000);
             } 
             else if (incoming_cmd == "START_MOTOR_TEST") {
-                set_state(State::SysId);
+                request_state(State::SysId);
                 get_params_start(5000);
             }
             else {
