@@ -28,8 +28,17 @@
 // Measured 10 ohm across any two motor leads; wye, so each phase is half.
 static const float PHASE_RESISTANCE_OHM = 5.0f;
 
-// Enough to turn an unloaded gimbal motor, far too little to heat one.
-static const float TARGET_CURRENT_A = 0.2f;
+// Phase current, and the only knob you should turn here.
+//
+// 0.2 A was not enough: the field rotated and the rotor stayed put, because the
+// torque it produces is below the motor's breakaway - cogging plus static
+// friction. Torque is proportional to current, so raising this is what gets the
+// rotor moving.
+//
+// If it still does not turn, go to 0.8 A, then stop and tell me rather than
+// climbing further. A GM4108H is a gimbal motor and its continuous rating is
+// around 1 A; past that you are heating the winding to prove a point.
+static const float TARGET_CURRENT_A = 0.5f;
 
 static const float VOLTAGE_LIMIT = PHASE_RESISTANCE_OHM * TARGET_CURRENT_A;  // 1.0 V
 
