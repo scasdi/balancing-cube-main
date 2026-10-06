@@ -68,11 +68,6 @@ void setup() {
     delay(STARTUP_DELAY_MS);
     Serial.println("B-G431B-ESC1 open-loop spin test");
 
-    // SimpleFOC's own diagnostics. driver.init() returns a bare 0 on failure and
-    // says nothing about why; with this enabled the library prints the actual
-    // reason - which timer or pin it could not configure - straight to Serial.
-    SimpleFOCDebug::enable(&Serial);
-
     driver.voltage_power_supply = SUPPLY_VOLTAGE;
     driver.voltage_limit        = VOLTAGE_LIMIT;   // Hard clamp at the driver too
 
