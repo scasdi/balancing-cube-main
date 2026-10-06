@@ -53,13 +53,13 @@ static const float PHASE_RESISTANCE_OHM = 5.0f;
 
 // Phase current, and the only knob you should turn here.
 //
-// 0.2 A was not enough: the field rotated and the rotor stayed put, because the
-// torque it produces is below the motor's breakaway - cogging plus static
-// friction. Torque is proportional to current, so raising this is what gets the
-// rotor moving.
+// No measurement justifies any particular value yet. The earlier attempts at
+// 0.2, 0.5 and 0.8 A all ran while driver.init() was returning 0, so no field
+// ever rotated and none of them say anything about breakaway torque. 0.5 A is
+// just a conservative starting point.
 //
-// If it still does not turn at init=1, go to 0.8 A, then stop and tell me rather
-// than climbing further. A GM4108H is a gimbal motor and its continuous rating
+// If the rotor will not turn with init=1 and voltage confirmed on the phases,
+// go to 0.8 A, then stop and tell me rather than climbing further. A GM4108H is a gimbal motor and its continuous rating
 // is around 1 A; past that you are heating the winding to prove a point.
 static const float TARGET_CURRENT_A = 0.5f;
 
@@ -73,8 +73,18 @@ static const float SUPPLY_VOLTAGE = 24.0f;
 // value; see MEASURING POLE PAIRS at the end of this file.
 static const int POLE_PAIRS_ASSUMED = 11;
 
-// Slow enough to time one revolution by eye: at 2 rad/s a turn takes ~3.1 s.
-static const float TARGET_VELOCITY_RADS = 2.0f;
+// Deliberately crawling, and the reason is the multimeter's bandwidth.
+//
+// Open loop spins the FIELD at (commanded velocity x pole pairs) electrical
+// rad/s, so 2 rad/s mechanical is 22 rad/s electrical - about 3.5 Hz. A DMM
+// averages over its sampling window, so at 3.5 Hz it reports the modulation
+// centre as one steady number and the switching is invisible. At 0.05 rad/s the
+// electrical period stretches to ~11 s and each phase voltage sweeps its full
+// range slowly enough to watch on the display.
+//
+// Raise this to 2.0 once a motor is attached: one mechanical revolution takes
+// over two minutes at this speed, which is useless for timing the rotor.
+static const float TARGET_VELOCITY_RADS = 0.05f;
 
 // Long enough for `pio run -t upload -t monitor` to attach before the banner is
 // printed. The upload resets the board, so without this the banner is emitted
@@ -189,6 +199,6 @@ void loop() {
  *     pole_pairs_actual = POLE_PAIRS_ASSUMED x commanded / measured
  *                       = 11 x 2.0 / (2*PI / seconds_per_revolution)
  *
- * With 11 assumed and 2 rad/s commanded, a revolution takes 3.1 s if 11 is
- * correct. Twice that means half the pole pairs, and so on.
+ * With 11 assumed and TARGET_VELOCITY_RADS set back to 2.0, a revolution takes
+ * 3.1 s if 11 is correct. Twice that means half the pole pairs, and so on.
  */
