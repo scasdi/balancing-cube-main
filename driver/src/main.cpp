@@ -179,6 +179,32 @@ void setup() {
     motor.velocity_limit = TARGET_VELOCITY_RADS;
     motor.init();
 
+    // The library's actual dead-time settings, read back rather than assumed.
+    //
+    // SimpleFOC computes dead_time_ns = (1e9 / pwm_frequency) * dead_zone and
+    // programs it into TIM1's BDTR register. Printing the inputs gives the real
+    // number instead of a guess, and gives the duty floor below which a
+    // commanded voltage produces no high-side conduction at all - the trap that
+    // made an earlier 0.3 V test phase read as a dead bridge.
+    const float dead_time_ns   = (1e9f / (float)driver.pwm_frequency) * driver.dead_zone;
+    const float duty_floor_v   = driver.dead_zone * SUPPLY_VOLTAGE;
+    const float commanded_duty = TEST_DRIVE_V / SUPPLY_VOLTAGE;
+
+    Serial.print("pwm_frequency = ");
+    Serial.print(driver.pwm_frequency);
+    Serial.println(" Hz");
+    Serial.print("dead_zone = ");
+    Serial.print(driver.dead_zone, 4);
+    Serial.print(" of the period = ");
+    Serial.print(dead_time_ns, 0);
+    Serial.println(" ns");
+    Serial.print("duty floor = ");
+    Serial.print(duty_floor_v, 3);
+    Serial.println("V (anything below this never switches the high side)");
+    Serial.print("commanded duty = ");
+    Serial.print(commanded_duty * 100.0f, 1);
+    Serial.println("%");
+
     // Printed while USB is still the only connection, so the build can be
     // confirmed before the cable comes out and the bus goes live.
     Serial.print("THIS BUILD DRIVES: ");
