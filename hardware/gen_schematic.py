@@ -28,8 +28,19 @@ def uid() -> str:
     h = f"{_uid:032x}"
     return f"{h[0:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:32]}"
 
-ROW = 2.54      # pin pitch
-PL  = 2.54      # pin length
+ROW  = 2.54     # pin pitch
+PL   = 2.54     # pin length
+GRID = 1.27     # KiCad's schematic grid
+
+def snap(v: float) -> float:
+    """Round to the schematic grid.
+
+    Pin offsets inside a symbol are already multiples of GRID, so snapping the
+    placement puts every pin on the grid too. This is not cosmetic: the wire
+    tool snaps to the grid, so a pin sitting between grid points cannot be
+    clicked on, and the sheet becomes uneditable by hand.
+    """
+    return round(round(v / GRID) * GRID, 2)
 
 
 # --- parts ------------------------------------------------------------------
@@ -195,7 +206,7 @@ def abs_pin(ref, num):
     for (r, _v, glyph, pins) in PARTS:
         if r != ref:
             continue
-        x0, y0 = PLACE[ref]
+        x0, y0 = snap(PLACE[ref][0]), snap(PLACE[ref][1])
         dx, dy = local_pin(pins, num, glyph)
         return (round(x0 + dx, 2), round(y0 - dy, 2))
     raise KeyError(ref)
@@ -410,8 +421,7 @@ def build() -> str:
     L.append('  )')
 
     for (ref, value, _g, pins) in PARTS:
-        x0, y0 = PLACE[ref]
-        place_part(ref, value, pins, x0, y0)
+        place_part(ref, value, pins, snap(PLACE[ref][0]), snap(PLACE[ref][1]))
     # ---- the V+ chain, drawn ------------------------------------------
     # This is the one path worth drawing: battery through the PDB and the fuse
     # to the driver, with C1 branching off it. Everything else travels by
@@ -432,6 +442,7 @@ def build() -> str:
     for (ref, net, part, pin, route) in POWER:
         x, y = abs_pin(part, pin)
         for (nx, ny) in route:
+            nx, ny = snap(nx), snap(ny)
             wire(x, y, nx, ny)
             x, y = nx, ny
         place_power(ref, net, x, y)
