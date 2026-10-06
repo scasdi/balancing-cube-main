@@ -86,23 +86,33 @@ void setup() {
     motor.init();
 
     driver_ready = true;
-
-    Serial.print("voltage_limit ");
-    Serial.print(VOLTAGE_LIMIT);
-    Serial.print(" V across ");
-    Serial.print(PHASE_RESISTANCE_OHM);
-    Serial.print(" ohm -> expect about ");
-    Serial.print(TARGET_CURRENT_A);
-    Serial.println(" A per phase");
-
-    Serial.print("commanding ");
-    Serial.print(TARGET_VELOCITY_RADS);
-    Serial.println(" rad/s open loop");
 }
 
 void loop() {
-    if (!driver_ready) return;
-    motor.move(TARGET_VELOCITY_RADS);
+    if (driver_ready) motor.move(TARGET_VELOCITY_RADS);
+
+    // Repeat the status rather than printing it once at boot. Catching a single
+    // startup message means opening the monitor in the right two seconds, which
+    // is awkward on a board whose reset button is not obvious - this way the
+    // monitor can be opened at any moment and still show what is going on.
+    static uint32_t last_report_ms = 0;
+    if (millis() - last_report_ms < 2000) return;
+    last_report_ms = millis();
+
+    if (!driver_ready) {
+        Serial.println("FATAL: driver init failed - motor is NOT being driven");
+        return;
+    }
+
+    Serial.print("driving: ");
+    Serial.print(VOLTAGE_LIMIT);
+    Serial.print(" V across ");
+    Serial.print(PHASE_RESISTANCE_OHM);
+    Serial.print(" ohm -> about ");
+    Serial.print(TARGET_CURRENT_A);
+    Serial.print(" A per phase, ");
+    Serial.print(TARGET_VELOCITY_RADS);
+    Serial.println(" rad/s open loop");
 }
 
 /*
