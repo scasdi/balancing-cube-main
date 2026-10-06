@@ -93,11 +93,11 @@ static const int POLE_PAIRS_ASSUMED = 11;
 // over two minutes at this speed, which is useless for timing the rotor.
 static const float TARGET_VELOCITY_RADS = 0.05f;
 
-// ONE PHASE AT A TIME - localises the shoot-through.
+// ONE PHASE PER BUILD - localises the shoot-through without serial.
 //
-// Driving all three phases at once told us current flows with no motor attached,
-// which means it circulates inside the board, but not where. Energising one
-// bridge at a time separates the three explanations:
+// Driving all three phases proved current flows with no motor attached, so it
+// circulates inside the board, but not where. Energising one bridge at a time
+// separates the three explanations:
 //
 //   current on any single phase    -> systemic, i.e. the dead-time configuration.
 //                                     Most likely SimpleFOC fell back to software
@@ -108,19 +108,25 @@ static const float TARGET_VELOCITY_RADS = 0.05f;
 //   current only with two or more  -> a path BETWEEN phase pads. Not
 //                                     shoot-through at all.
 //
+// The selection is compile-time rather than a timed sweep because a sweep needs
+// serial and the bus powered together to attribute a reading to a phase, and
+// that combination is not happening without a USB isolator. So: flash, confirm
+// over USB which phase this build drives, unplug USB, power the bus, read the
+// ammeter. No timing and no correlation to get wrong.
+//
+//   0 = phase A    1 = phase B    2 = phase C    3 = none (baseline)
+static const int TEST_PHASE = 0;
+
+static_assert(TEST_PHASE >= 0 && TEST_PHASE <= 3, "TEST_PHASE must be 0, 1, 2 or 3");
+
+static const char* const PHASE_NAME[4] = { "phase A", "phase B", "phase C", "nothing (baseline)" };
+
 // A commanded duty below dead_zone produces no high-side conduction whatsoever -
 // the pulse is swallowed by the enforced both-off time. That is what made the
 // previous run's 0.3 V phase read zero and look broken. At a 6 V bus the floor is
 // 0.02 x 6 = 0.12 V, so 2.0 V (33% duty) clears it by a wide margin. It also
 // stays under VOLTAGE_LIMIT, which setPwm() would otherwise clamp it to.
 static const float TEST_DRIVE_V = 2.0f;
-
-// Long enough to read a supply's ammeter, which averages and settles slowly.
-static const uint32_t STEP_MS = 8000;
-
-// Step 3 drives nothing: it is the baseline the other three are measured against,
-// and it should read the 0.069 A quiescent draw.
-static const char* const STEP_NAME[4] = { "A only", "B only", "C only", "all off" };
 
 // Long enough for `pio run -t upload -t monitor` to attach before the banner is
 // printed. The upload resets the board, so without this the banner is emitted
@@ -173,32 +179,26 @@ void setup() {
     motor.velocity_limit = TARGET_VELOCITY_RADS;
     motor.init();
 
-    Serial.println("open-loop velocity control active");
+    // Printed while USB is still the only connection, so the build can be
+    // confirmed before the cable comes out and the bus goes live.
+    Serial.print("THIS BUILD DRIVES: ");
+    Serial.print(PHASE_NAME[TEST_PHASE]);
+    Serial.print(" at ");
+    Serial.print(TEST_DRIVE_V);
+    Serial.print("V, bus expected at ");
+    Serial.print(SUPPLY_VOLTAGE);
+    Serial.println("V");
 }
 
 void loop() {
     // motor.move() is deliberately NOT called: the motion layer is proven innocent
     // and leaving it out keeps the measurement unambiguous.
-    const uint8_t step = (uint8_t)((millis() / STEP_MS) % 4);
+    // TEST_PHASE is a compile-time constant, so this folds to one fixed call.
+    const float ua = (TEST_PHASE == 0) ? TEST_DRIVE_V : 0.0f;
+    const float ub = (TEST_PHASE == 1) ? TEST_DRIVE_V : 0.0f;
+    const float uc = (TEST_PHASE == 2) ? TEST_DRIVE_V : 0.0f;
 
-    float ua = 0.0f, ub = 0.0f, uc = 0.0f;
-    switch (step) {
-        case 0: ua = TEST_DRIVE_V; break;
-        case 1: ub = TEST_DRIVE_V; break;
-        case 2: uc = TEST_DRIVE_V; break;
-        default: break;                  // all off
-    }
     if (driver_init_result == 1) driver.setPwm(ua, ub, uc);
-
-    // Announce the transition so the ammeter reading can be matched to the phase
-    // that caused it. Without this the sweep is unreadable.
-    static uint8_t last_step = 0xFF;
-    if (step != last_step) {
-        last_step = step;
-        Serial.print(">>> ");
-        Serial.print(STEP_NAME[step]);
-        Serial.println(" - read the supply current now");
-    }
 
     // Echo whatever arrives, which is the only way to confirm the PC-to-board
     // direction. The command interface will need it working later anyway.
@@ -230,7 +230,7 @@ void loop() {
     }
 
     Serial.print(" driving ");
-    Serial.print(STEP_NAME[step]);
+    Serial.print(PHASE_NAME[TEST_PHASE]);
     Serial.print(" at ");
     Serial.print(TEST_DRIVE_V);
     Serial.println("V");
