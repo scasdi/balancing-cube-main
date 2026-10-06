@@ -86,6 +86,24 @@ static const int POLE_PAIRS_ASSUMED = 11;
 // over two minutes at this speed, which is useless for timing the rotor.
 static const float TARGET_VELOCITY_RADS = 0.05f;
 
+// STATIC DUTY TEST - three fixed voltages, one per phase.
+//
+// This bypasses motor.move() and everything under it: velocityOpenloop(), the
+// electrical angle, the sine tables, the sensor-direction defaults. It talks to
+// driver.setPwm() directly, which is the last software step before the timer
+// registers. If the pads stay at 0 V with this, the fault is in the timer or the
+// power stage, and no amount of motion-layer debugging will find it.
+//
+// setPwm() clamps each argument to voltage_limit, then computes
+// duty = U / voltage_power_supply. The pad's DC average is duty x bus voltage,
+// which is U again - so each pad should measure the number commanded here.
+//
+// Three different values, because three identical ones could be confused with a
+// common-mode offset or a probe on the wrong pad.
+static const float TEST_UA = 2.5f;
+static const float TEST_UB = 1.2f;
+static const float TEST_UC = 0.3f;
+
 // Long enough for `pio run -t upload -t monitor` to attach before the banner is
 // printed. The upload resets the board, so without this the banner is emitted
 // into a port nobody is listening on yet and the first evidence is lost.
@@ -141,9 +159,10 @@ void setup() {
 }
 
 void loop() {
-    // Must run on every iteration, not on the heartbeat: move() advances the
-    // commutation angle, so throttling it would throttle the motor.
-    if (driver_init_result == 1) motor.move(TARGET_VELOCITY_RADS);
+    // motor.move() is deliberately NOT called: this is the reduced test, and the
+    // whole point is to leave the motion layer out of the measurement. The timer
+    // registers hold their value, so re-applying every iteration is harmless.
+    if (driver_init_result == 1) driver.setPwm(TEST_UA, TEST_UB, TEST_UC);
 
     // Echo whatever arrives, which is the only way to confirm the PC-to-board
     // direction. The command interface will need it working later anyway.
@@ -174,15 +193,13 @@ void loop() {
         return;
     }
 
-    Serial.print(" driving ");
-    Serial.print(VOLTAGE_LIMIT);
-    Serial.print("V across ");
-    Serial.print(PHASE_RESISTANCE_OHM);
-    Serial.print("ohm -> about ");
-    Serial.print(TARGET_CURRENT_A);
-    Serial.print("A per phase, ");
-    Serial.print(TARGET_VELOCITY_RADS);
-    Serial.println(" rad/s open loop");
+    Serial.print(" static setPwm(");
+    Serial.print(TEST_UA);
+    Serial.print(", ");
+    Serial.print(TEST_UB);
+    Serial.print(", ");
+    Serial.print(TEST_UC);
+    Serial.println(") - measure these volts DC at the three phase pads");
 }
 
 /*
