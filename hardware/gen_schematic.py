@@ -88,8 +88,8 @@ PARTS = [
     ]),
     ("U1", "ESP32-DevKitC", "box", [
         ("1",  "5V",     "power_in",     "L"),
-        ("2",  "GND",    "power_in",     "L"),
-        ("3",  "3V3",    "power_out",    "L"),
+        ("2",  "3V3",    "power_out",    "L"),
+        ("3",  "GND",    "power_in",     "L"),
         ("4",  "GPIO17", "output",       "R"),
         ("5",  "GPIO16", "input",        "R"),
         ("6",  "GPIO4",  "output",       "R"),
@@ -107,28 +107,34 @@ PARTS = [
 ]
 
 PLACE = {
-    "BT1": (38,  62),   "J1": (84,  60),   "F1": (132, 46),
-    "C1":  (158, 60),   "A1": (206, 62),   "M1": (286, 54),
-    "U3":  (84, 120),   "M2": (166, 120),
-    "U1":  (84, 190),   "U2": (190, 180),
+    "BT1": (40,  73.81), "J1": (90,  70),     "F1": (140, 66.19),
+    "C1":  (160, 76),    "A1": (206, 73.81),  "M1": (286, 54),
+    "U3":  (84, 120),    "M2": (166, 120),
+    "U1":  (84, 190),    "U2": (190, 180),
 }
 
-# Power symbols: ref -> (net, at_x, at_y, kind)  kind: gnd | rail
+# Power symbols. Each names the pin it serves and the dog-leg that reaches it;
+# the symbol is placed at the end of that route. A bare [] means the symbol sits
+# directly on the pin, which is the normal case - a ground pin needs no wire.
+#   (ref, net, part, pin, [(x, y), ...])
 POWER = [
-    ("#PWR01", "GND",  38,  80, "gnd"),
-    ("#PWR02", "GND",  158, 80, "gnd"),
-    ("#PWR03", "GND",  118, 80, "gnd"),      # J1 GND
-    ("#PWR04", "GND",  186, 92, "gnd"),      # A1 V- and GND
-    ("#PWR05", "GND",  64,  140, "gnd"),     # U3 IN-
-    ("#PWR06", "GND",  150, 134, "gnd"),     # M2 GND
-    ("#PWR07", "GND",  64,  208, "gnd"),     # U1 GND
-    ("#PWR08", "GND",  170, 196, "gnd"),     # U2 GND
-    ("#PWR09", "+12V", 118, 40,  "rail"),    # J1 12V out
-    ("#PWR10", "+12V", 64,  104, "rail"),    # U3 IN+
-    ("#PWR11", "+5V",  126, 40,  "rail"),    # J1 5V out
-    ("#PWR12", "+5V",  64,  174, "rail"),    # U1 5V
-    ("#PWR13", "+3V3", 56,  182, "rail"),    # U1 3V3 out
-    ("#PWR14", "+3V3", 170, 172, "rail"),    # U2 VIN
+    ("#PWR01", "GND",  "BT1", "2", []),
+    ("#PWR02", "GND",  "J1",  "2", []),
+    ("#PWR03", "GND",  "J1",  "6", []),
+    ("#PWR04", "GND",  "C1",  "2", []),
+    ("#PWR05", "GND",  "A1",  "2", [(178, 68.73), (178, 88)]),
+    ("#PWR06", "GND",  "A1",  "3", [(182, 71.27), (182, 94)]),
+    ("#PWR07", "GND",  "U3",  "2", []),
+    ("#PWR08", "GND",  "U3",  "4", []),
+    ("#PWR09", "GND",  "M2",  "2", [(142, 120), (142, 130)]),
+    ("#PWR10", "GND",  "U1",  "3", [(60, 187.46), (60, 202)]),
+    ("#PWR11", "GND",  "U2",  "2", [(160, 181.27), (160, 192)]),
+    ("#PWR12", "+12V", "J1",  "4", [(130, 68.73), (130, 95)]),
+    ("#PWR13", "+5V",  "J1",  "5", [(118, 71.27), (118, 95)]),
+    ("#PWR14", "+12V", "U3",  "1", [(56, 118.73), (56, 110)]),
+    ("#PWR15", "+5V",  "U1",  "1", [(54, 182.38), (54, 174)]),
+    ("#PWR16", "+3V3", "U1",  "2", [(46, 184.92), (46, 174)]),
+    ("#PWR17", "+3V3", "U2",  "1", [(164, 178.73), (164, 172)]),
 ]
 
 # Global labels on signal pins: (ref, pin, net)
@@ -257,8 +263,13 @@ def emit_lib_symbol(ref, value, glyph, pins):
     name = "".join(c for c in ref if c.isalpha()) + "_" + ref
     _w, h = body(pins)
     top = max(h / 2 + 2.54, 10.16)
+    plain = glyph in ("battery", "cap_pol", "fuse", "motor")
     o = [f'    (symbol "cube:{name}"',
-         '      (pin_names (offset 1.016))',
+         # A capacitor needs no "pin 1". Hiding numbers and naming the pins "~"
+         # (KiCad's "no name") is what keeps passives uncluttered.
+         ('      (pin_numbers hide)' if plain else '      (pin_names (offset 1.016))'),]
+    o += ['      (pin_names (offset 1.016))'] if plain else []
+    o += [
          '      (exclude_from_sim no) (in_bom yes) (on_board yes)',
          f'      (property "Reference" "{ref[0]}" (at 0 {top:.2f} 0)',
          '        (effects (font (size 1.27 1.27)) (justify left)))',
@@ -270,15 +281,16 @@ def emit_lib_symbol(ref, value, glyph, pins):
     o += glyph_body(glyph, pins, name)
     o.append('      )')
     o.append(f'      (symbol "{name}_1_1"')
-    hide = ' hide' if glyph in ("battery", "cap_pol", "fuse", "motor") else ''
     for (num, pname, ptype, _side) in pins:
+        if plain:
+            pname = "~"
         x, y = local_pin(pins, num, glyph)
         # Symbol-space pin angle: the direction from the connection point
         # toward the body, which is the opposite of how the pin faces on-sheet.
         ang = {180: 0, 0: 180, 90: 270, 270: 90}[pin_angle(ref, num)]
         o.append(f'        (pin {ptype} line (at {x:.2f} {y:.2f} {ang}) (length {PL})')
-        o.append(f'          (name "{pname}" (effects (font (size 1.27 1.27)){hide}))')
-        o.append(f'          (number "{num}" (effects (font (size 1.27 1.27)){hide}))')
+        o.append(f'          (name "{pname}" (effects (font (size 1.27 1.27))))')
+        o.append(f'          (number "{num}" (effects (font (size 1.27 1.27))))')
         o.append('        )')
     o.append('      )')
     o.append('    )')
@@ -290,11 +302,14 @@ def emit_power_lib():
     for nm, kind in (("GND", "gnd"), ("P5V", "rail"), ("P3V3", "rail"), ("P12V", "rail")):
         net = {"GND": "GND", "P5V": "+5V", "P3V3": "+3V3", "P12V": "+12V"}[nm]
         o += [f'    (symbol "cube:{nm}"',
-              '      (power) (pin_names (offset 0))',
+              '      (power) (pin_numbers hide) (pin_names (offset 0))',
               '      (exclude_from_sim no) (in_bom no) (on_board no)',
               '      (property "Reference" "#PWR" (at 0 -6.35 0)',
               '        (effects (font (size 1.27 1.27)) hide))',
-              f'      (property "Value" "{net}" (at 0 {"-3.81" if kind=="gnd" else "3.81"} 0)',
+              # Value sits clear of the glyph: below the triangle's tip for
+              # GND, above the bar for a rail. Putting it level with the glyph
+              # is what made the text unreadable.
+              f'      (property "Value" "{net}" (at 0 {"-6.35" if kind=="gnd" else "4.45"} 0)',
               '        (effects (font (size 1.27 1.27))))',
               ]
         if kind == "gnd":
@@ -306,8 +321,8 @@ def emit_power_lib():
                   '      )',
                   f'      (symbol "{nm}_1_1"',
                   f'        (pin power_in line (at 0 0 270) (length 0)',
-                  f'          (name "{net}" (effects (font (size 1.27 1.27)) hide))',
-                  '          (number "1" (effects (font (size 1.27 1.27)) hide))',
+                  f'          (name "~" (effects (font (size 1.27 1.27))))',
+                  '          (number "1" (effects (font (size 1.27 1.27))))',
                   '        )',
                   '      )']
         else:
@@ -319,8 +334,8 @@ def emit_power_lib():
                   '      )',
                   f'      (symbol "{nm}_1_1"',
                   f'        (pin power_in line (at 0 0 90) (length 0)',
-                  f'          (name "{net}" (effects (font (size 1.27 1.27)) hide))',
-                  '          (number "1" (effects (font (size 1.27 1.27)) hide))',
+                  f'          (name "~" (effects (font (size 1.27 1.27))))',
+                  '          (number "1" (effects (font (size 1.27 1.27))))',
                   '        )',
                   '      )']
         o.append('    )')
@@ -346,14 +361,14 @@ def glabel(net, x, y, ang, just):
     OUT.append('    (fields_autoplaced yes)')
     OUT.append(f'    (effects (font (size 1.27 1.27)) (justify {just})) (uuid "{uid()}"))')
 
-def place_power(ref, net, x, y, kind):
+def place_power(ref, net, x, y):
     lib = {"GND": "GND", "+5V": "P5V", "+3V3": "P3V3", "+12V": "P12V"}[net]
     OUT.append(f'  (symbol (lib_id "cube:{lib}") (at {x:.2f} {y:.2f} 0) (unit 1)')
     OUT.append('    (exclude_from_sim no) (in_bom no) (on_board no) (dnp no)')
     OUT.append(f'    (uuid "{uid()}")')
     OUT.append(f'    (property "Reference" "{ref}" (at {x:.2f} {y - 6.35:.2f} 0)')
     OUT.append('      (effects (font (size 1.27 1.27)) hide))')
-    OUT.append(f'    (property "Value" "{net}" (at {x:.2f} {y + (4.5 if net == "GND" else -4.5):.2f} 0)')
+    OUT.append(f'    (property "Value" "{net}" (at {x:.2f} {y + (6.35 if net == "GND" else -4.45):.2f} 0)')
     OUT.append('      (effects (font (size 1.27 1.27))))')
     OUT.append(f'    (pin "1" (uuid "{uid()}"))')
     OUT.append(f'    (instances (project "cube" (path "/{SHEET_UUID}"')
@@ -397,68 +412,29 @@ def build() -> str:
     for (ref, value, _g, pins) in PARTS:
         x0, y0 = PLACE[ref]
         place_part(ref, value, pins, x0, y0)
-    for (ref, net, x, y, kind) in POWER:
-        place_power(ref, net, x, y, kind)
-
-    # ---- drawn power chain -------------------------------------------------
-    VBUS = 40.0                                   # the V+ rail's y
+    # ---- the V+ chain, drawn ------------------------------------------
+    # This is the one path worth drawing: battery through the PDB and the fuse
+    # to the driver, with C1 branching off it. Everything else travels by
+    # symbol or label, because a schematic's GND has no topology to show.
     bp, bn = abs_pin("BT1", "1"), abs_pin("BT1", "2")
-    j1p, j1n = abs_pin("J1", "1"), abs_pin("J1", "2")
-    j1o, j1g = abs_pin("J1", "3"), abs_pin("J1", "6")
-    j1_12, j1_5 = abs_pin("J1", "4"), abs_pin("J1", "5")
+    j1i, j1o = abs_pin("J1", "1"), abs_pin("J1", "3")
     f1a, f1b = abs_pin("F1", "1"), abs_pin("F1", "2")
-    c1p, c1n = abs_pin("C1", "1"), abs_pin("C1", "2")
-    a1v, a1m, a1g = abs_pin("A1", "1"), abs_pin("A1", "2"), abs_pin("A1", "3")
-    GNDBUS = 80.0
+    c1p = abs_pin("C1", "1")
+    a1v = abs_pin("A1", "1")
 
-    # battery + -> PDB in+
-    wire(bp[0], bp[1], bp[0], VBUS); wire(bp[0], VBUS, j1p[0], VBUS)
-    wire(j1p[0], VBUS, j1p[0], j1p[1])
-    # battery - and PDB in- down to the ground bus
-    wire(bn[0], bn[1], bn[0], GNDBUS)
-    wire(j1n[0], j1n[1], 64.0, j1n[1]); wire(64.0, j1n[1], 64.0, GNDBUS)
-    wire(bn[0], GNDBUS, 64.0, GNDBUS)
-    # PDB GND pin to the same bus
-    wire(j1g[0], j1g[1], 118.0, j1g[1]); wire(118.0, j1g[1], 118.0, GNDBUS)
-    wire(64.0, GNDBUS, 118.0, GNDBUS)
-    junction(64.0, GNDBUS)
+    wire(bp[0], bp[1], j1i[0], j1i[1])          # battery + -> PDB in+
+    wire(j1o[0], j1o[1], f1a[0], f1a[1])        # PDB out -> fuse
+    wire(f1b[0], f1b[1], a1v[0], a1v[1])        # fuse -> driver V+
+    wire(c1p[0], c1p[1], c1p[0], f1b[1])        # C1 branches off that run
+    junction(c1p[0], f1b[1])
 
-    # PDB VBAT_OUT -> fuse -> driver V+
-    wire(j1o[0], j1o[1], f1a[0] - 6, j1o[1]); wire(f1a[0] - 6, j1o[1], f1a[0] - 6, f1a[1])
-    wire(f1a[0] - 6, f1a[1], f1a[0], f1a[1])
-    wire(f1b[0], f1b[1], a1v[0] - 8, f1b[1])
-    wire(a1v[0] - 8, f1b[1], a1v[0] - 8, a1v[1]); wire(a1v[0] - 8, a1v[1], a1v[0], a1v[1])
-
-    # C1 across the driver's own terminals
-    wire(c1p[0], f1b[1], c1p[0], c1p[1]); junction(c1p[0], f1b[1])
-    wire(c1n[0], c1n[1], c1n[0], GNDBUS)
-    wire(118.0, GNDBUS, c1n[0], GNDBUS)
-    junction(118.0, GNDBUS)
-
-    # driver V- and GND to the bus
-    for p in (a1m, a1g):
-        wire(p[0], p[1], 186.0, p[1])
-    wire(186.0, a1m[1], 186.0, 92.0)
-    wire(186.0, a1g[1], 186.0, 92.0)
-    junction(186.0, a1g[1])
-    wire(c1n[0], GNDBUS, 186.0, GNDBUS)
-    junction(186.0, GNDBUS)
-
-    # rails off the PDB
-    wire(j1_12[0], j1_12[1], 118.0, j1_12[1]); wire(118.0, j1_12[1], 118.0, 40.0)
-    wire(j1_5[0], j1_5[1], 126.0, j1_5[1]);    wire(126.0, j1_5[1], 126.0, 40.0)
-
-    # servo buck, ESP32, IMU: short stubs to their power symbols
-    for ref, pin, px, py in (("U3", "1", 64.0, 104.0), ("U3", "2", 64.0, 140.0),
-                             ("U1", "1", 64.0, 174.0), ("U1", "2", 64.0, 208.0),
-                             ("U1", "3", 56.0, 182.0), ("U2", "1", 170.0, 172.0),
-                             ("U2", "2", 170.0, 196.0), ("M2", "2", 150.0, 134.0)):
-        p = abs_pin(ref, pin)
-        wire(p[0], p[1], px, p[1]); wire(px, p[1], px, py)
-    p = abs_pin("U3", "4")
-    wire(p[0], p[1], p[0] + 8, p[1]); wire(p[0] + 8, p[1], p[0] + 8, 140.0)
-    wire(p[0] + 8, 140.0, 64.0, 140.0)
-    junction(64.0, 140.0)
+    # power symbols, each at the end of its own short route
+    for (ref, net, part, pin, route) in POWER:
+        x, y = abs_pin(part, pin)
+        for (nx, ny) in route:
+            wire(x, y, nx, ny)
+            x, y = nx, ny
+        place_power(ref, net, x, y)
 
     # ---- labels and no-connects -------------------------------------------
     for (ref, pin, net) in LABELS:
