@@ -65,8 +65,15 @@ static const float TARGET_CURRENT_A = 0.5f;
 
 static const float VOLTAGE_LIMIT = PHASE_RESISTANCE_OHM * TARGET_CURRENT_A;  // 2.5 V
 
-// The bench supply setting. SimpleFOC needs it to scale its PWM duty.
-static const float SUPPLY_VOLTAGE = 24.0f;
+// The bench supply setting, and it must match the supply's actual output: every
+// duty SimpleFOC computes is U / voltage_power_supply, so a mismatch here scales
+// every phase voltage wrongly.
+//
+// Dropped from 24 V to 6 V for the shoot-through hunt. If both FETs of a bridge
+// conduct at once, the bus is shorted through them and the current is set by the
+// bus voltage against their on-resistance - so a quarter of the voltage is a
+// quarter of the fault current, and the test becomes survivable.
+static const float SUPPLY_VOLTAGE = 6.0f;
 
 // Unknown for the GM4108H. In open loop this only scales speed - it never
 // affects current - so a wrong guess is harmless. The test measures the real
@@ -86,23 +93,34 @@ static const int POLE_PAIRS_ASSUMED = 11;
 // over two minutes at this speed, which is useless for timing the rotor.
 static const float TARGET_VELOCITY_RADS = 0.05f;
 
-// STATIC DUTY TEST - three fixed voltages, one per phase.
+// ONE PHASE AT A TIME - localises the shoot-through.
 //
-// This bypasses motor.move() and everything under it: velocityOpenloop(), the
-// electrical angle, the sine tables, the sensor-direction defaults. It talks to
-// driver.setPwm() directly, which is the last software step before the timer
-// registers. If the pads stay at 0 V with this, the fault is in the timer or the
-// power stage, and no amount of motion-layer debugging will find it.
+// Driving all three phases at once told us current flows with no motor attached,
+// which means it circulates inside the board, but not where. Energising one
+// bridge at a time separates the three explanations:
 //
-// setPwm() clamps each argument to voltage_limit, then computes
-// duty = U / voltage_power_supply. The pad's DC average is duty x bus voltage,
-// which is U again - so each pad should measure the number commanded here.
+//   current on any single phase    -> systemic, i.e. the dead-time configuration.
+//                                     Most likely SimpleFOC fell back to software
+//                                     6-PWM, where the high and low channels are
+//                                     separate and need not be phase-aligned, so
+//                                     they can overlap.
+//   current on one phase only      -> that half-bridge is faulty.
+//   current only with two or more  -> a path BETWEEN phase pads. Not
+//                                     shoot-through at all.
 //
-// Three different values, because three identical ones could be confused with a
-// common-mode offset or a probe on the wrong pad.
-static const float TEST_UA = 2.5f;
-static const float TEST_UB = 1.2f;
-static const float TEST_UC = 0.3f;
+// A commanded duty below dead_zone produces no high-side conduction whatsoever -
+// the pulse is swallowed by the enforced both-off time. That is what made the
+// previous run's 0.3 V phase read zero and look broken. At a 6 V bus the floor is
+// 0.02 x 6 = 0.12 V, so 2.0 V (33% duty) clears it by a wide margin. It also
+// stays under VOLTAGE_LIMIT, which setPwm() would otherwise clamp it to.
+static const float TEST_DRIVE_V = 2.0f;
+
+// Long enough to read a supply's ammeter, which averages and settles slowly.
+static const uint32_t STEP_MS = 8000;
+
+// Step 3 drives nothing: it is the baseline the other three are measured against,
+// and it should read the 0.069 A quiescent draw.
+static const char* const STEP_NAME[4] = { "A only", "B only", "C only", "all off" };
 
 // Long enough for `pio run -t upload -t monitor` to attach before the banner is
 // printed. The upload resets the board, so without this the banner is emitted
@@ -159,10 +177,28 @@ void setup() {
 }
 
 void loop() {
-    // motor.move() is deliberately NOT called: this is the reduced test, and the
-    // whole point is to leave the motion layer out of the measurement. The timer
-    // registers hold their value, so re-applying every iteration is harmless.
-    if (driver_init_result == 1) driver.setPwm(TEST_UA, TEST_UB, TEST_UC);
+    // motor.move() is deliberately NOT called: the motion layer is proven innocent
+    // and leaving it out keeps the measurement unambiguous.
+    const uint8_t step = (uint8_t)((millis() / STEP_MS) % 4);
+
+    float ua = 0.0f, ub = 0.0f, uc = 0.0f;
+    switch (step) {
+        case 0: ua = TEST_DRIVE_V; break;
+        case 1: ub = TEST_DRIVE_V; break;
+        case 2: uc = TEST_DRIVE_V; break;
+        default: break;                  // all off
+    }
+    if (driver_init_result == 1) driver.setPwm(ua, ub, uc);
+
+    // Announce the transition so the ammeter reading can be matched to the phase
+    // that caused it. Without this the sweep is unreadable.
+    static uint8_t last_step = 0xFF;
+    if (step != last_step) {
+        last_step = step;
+        Serial.print(">>> ");
+        Serial.print(STEP_NAME[step]);
+        Serial.println(" - read the supply current now");
+    }
 
     // Echo whatever arrives, which is the only way to confirm the PC-to-board
     // direction. The command interface will need it working later anyway.
@@ -193,13 +229,11 @@ void loop() {
         return;
     }
 
-    Serial.print(" static setPwm(");
-    Serial.print(TEST_UA);
-    Serial.print(", ");
-    Serial.print(TEST_UB);
-    Serial.print(", ");
-    Serial.print(TEST_UC);
-    Serial.println(") - measure these volts DC at the three phase pads");
+    Serial.print(" driving ");
+    Serial.print(STEP_NAME[step]);
+    Serial.print(" at ");
+    Serial.print(TEST_DRIVE_V);
+    Serial.println("V");
 }
 
 /*
