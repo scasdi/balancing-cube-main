@@ -40,7 +40,7 @@ static const float PHASE_RESISTANCE_OHM = 5.0f;
 // around 1 A; past that you are heating the winding to prove a point.
 static const float TARGET_CURRENT_A = 0.5f;
 
-static const float VOLTAGE_LIMIT = PHASE_RESISTANCE_OHM * TARGET_CURRENT_A;  // 1.0 V
+static const float VOLTAGE_LIMIT = PHASE_RESISTANCE_OHM * TARGET_CURRENT_A;  // 2.5 V
 
 // The bench supply setting. SimpleFOC needs it to scale its PWM duty.
 static const float SUPPLY_VOLTAGE = 24.0f;
